@@ -335,17 +335,17 @@ static void UpdateDrawFrame(void)
         BeginMode3D(camera);
         // DrawModel(g_assets.confirs[0], (Vector3){-3.0f, 0.0f, -0.5f}, 1.0f, WHITE);
         SetRandomSeed(312);
-        for (int i = 0; i < 30; i++)
-        {
-            Vector3 pos = {GetRandomValue(-100, 100) * 0.1f + 7.0f, 0, GetRandomValue(-100, 100) * 0.1f + 3.0f};
-            float height = GetRandomValue(7,12) * 0.1f;
-            float width = (GetRandomValue(-2,2) * 0.1f) + height;
-            DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
-                (Vector3){width, height, width}, WHITE);
-        }
+        // for (int i = 0; i < 30; i++)
+        // {
+        //     Vector3 pos = {GetRandomValue(-100, 100) * 0.1f + 7.0f, 0, GetRandomValue(-100, 100) * 0.1f + 3.0f};
+        //     float height = GetRandomValue(7,12) * 0.1f;
+        //     float width = (GetRandomValue(-2,2) * 0.1f) + height;
+        //     DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+        //         (Vector3){width, height, width}, WHITE);
+        // }
         const char *map = 
-            "g g g g g g "
-            " g g g g g g"
+            "g g g f f f "
+            " g g g g f f"
             "g g g g g g "
             " g g g g g g"
             "g g g g g w "
@@ -357,25 +357,37 @@ static void UpdateDrawFrame(void)
         for (int i = 0, x = 0, y = 0; map[i]; i++)
         {
             Model model = {0};
+            int confirCount = 0;
             switch (map[i])
             {
                 default: continue;
                 case 'g': model = g_assets.hex_grass; break;
                 case 'w': model = g_assets.hex_water; break;
+                case 'f': model = g_assets.hex_grass, confirCount = 5; break;
             }
             
-            DrawModel(model, (Vector3){HEX_X*(offset + x), 0.0f, HEX_Y * y}, 1.0f, WHITE);
+            Vector3 pos = (Vector3){HEX_X*(offset - x), 0.0f, -HEX_Y * y};
+            DrawModel(model, pos, 1.0f, WHITE);
+            for (int cf = 0; cf < confirCount; cf++)
+            {
+                repeat:
+                float dx = GetRandomValue(-100,100) * 0.005f;
+                float dy = GetRandomValue(-100,100) * 0.005f;
+                if (dx*dx+dy*dy > 1.0f) goto repeat;
+                
+                pos.x += dx * HEX_X * 0.25f;
+                pos.z += dy * HEX_Y * 0.25f;
+                float height = GetRandomValue(7,12) * 0.07f;
+                float width = (GetRandomValue(-2,2) * 0.1f) + height;
+            
+                DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                    (Vector3){width, height, width}, WHITE);
+            }
             if (++x == mapW)
             {
                 x = 0;
-                if ((y++ & 1) == 0)
-                {
-                    offset = 0.5f;
-                }
-                else
-                {
-                    offset = 0.0f;
-                }
+                if ((y++ & 1) == 0) offset = 0.5f;
+                else offset = 0.0f;
             }
         }
         // DrawModel(g_assets.hex_grass, (Vector3){0}, 1.0f, WHITE);
