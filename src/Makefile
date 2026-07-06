@@ -33,6 +33,7 @@ PROJECT_NAME          ?= raylib_game
 PROJECT_VERSION       ?= 1.0
 PROJECT_BUILD_PATH    ?= .
 PROJECT_SOURCE_FILES  ?= \
+    assets.c \
     raylib_game.c \
     screen_logo.c \
     screen_title.c \
