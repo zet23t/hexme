@@ -375,8 +375,8 @@ static void UpdateDrawFrame(void)
                 float dy = GetRandomValue(-100,100) * 0.005f;
                 if (dx*dx+dy*dy > 1.0f) goto repeat;
                 
-                pos.x += dx * HEX_X * 0.25f;
-                pos.z += dy * HEX_Y * 0.25f;
+                pos.x += dx * HEX_X * 0.4f;
+                pos.z += dy * HEX_Y * 0.4f;
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
