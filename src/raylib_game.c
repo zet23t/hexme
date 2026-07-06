@@ -247,6 +247,9 @@ typedef struct
 #define PAWN_TRANSITION_T 0.2f
 #define PAWN_JUMP_DIST 0.75f
 
+#define HEX_X 6.925f
+#define HEX_Y 6.0f
+
 #define NUM_NPCS 4
 typedef struct 
 {
@@ -310,12 +313,13 @@ static void UpdateDrawFrame(void)
         g_game.player_pawn.size = 1.0f;
     }
 
+    float dt = GetFrameTime();
 
     BeginDrawing();
 
         ClearBackground(BLACK);
 
-        Camera3D camera = {
+        static Camera3D camera = {
             .fovy = 25.0f,
             .position = {0.0f, 50.0f, -30.0f},
             .target = {0.0f, 0.0f, 0.0f},
@@ -323,12 +327,58 @@ static void UpdateDrawFrame(void)
             .up = {0.0f, 1.0f, 0.0f}
         };
 
-        BeginMode3D(camera);
-        DrawModel(g_assets.hex_grass, (Vector3){0}, 1.0f, WHITE);
-        DrawModel(g_assets.hex_grass, (Vector3){6.925f, 0.0f, 0.0f}, 1.0f, WHITE);
-        DrawModel(g_assets.hex_water, (Vector3){6.925f*0.5f, 0.0f, -6.0f}, 1.0f, WHITE);
+        camera.target = Vector3Lerp(camera.target, g_game.player_pawn.current_pos, dt);
+        camera.position = Vector3Add(camera.target, (Vector3){0.0f, 50.0f, -30.0f});
 
-        float dt = GetFrameTime();
+        BeginMode3D(camera);
+        // DrawModel(g_assets.confirs[0], (Vector3){-3.0f, 0.0f, -0.5f}, 1.0f, WHITE);
+        SetRandomSeed(312);
+        for (int i = 0; i < 30; i++)
+        {
+            Vector3 pos = {GetRandomValue(-100, 100) * 0.1f + 7.0f, 0, GetRandomValue(-100, 100) * 0.1f + 3.0f};
+            float height = GetRandomValue(7,12) * 0.1f;
+            float width = (GetRandomValue(-2,2) * 0.1f) + height;
+            DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                (Vector3){width, height, width}, WHITE);
+        }
+        const char *map = 
+            "g g g g g g "
+            " g g g g g g"
+            "g g g g g g "
+            " g g g g g g"
+            "g g g g g w "
+            " g g w w w w"
+            "g g w w w w "
+            ;
+        int mapW = 6;
+        float offset = 0.0f;
+        for (int i = 0, x = 0, y = 0; map[i]; i++)
+        {
+            Model model = {0};
+            switch (map[i])
+            {
+                default: continue;
+                case 'g': model = g_assets.hex_grass; break;
+                case 'w': model = g_assets.hex_water; break;
+            }
+            
+            DrawModel(model, (Vector3){HEX_X*(offset + x), 0.0f, HEX_Y * y}, 1.0f, WHITE);
+            if (++x == mapW)
+            {
+                x = 0;
+                if ((y++ & 1) == 0)
+                {
+                    offset = 0.5f;
+                }
+                else
+                {
+                    offset = 0.0f;
+                }
+            }
+        }
+        // DrawModel(g_assets.hex_grass, (Vector3){0}, 1.0f, WHITE);
+        // DrawModel(g_assets.hex_grass, (Vector3){HEX_X, 0.0f, 0.0f}, 1.0f, WHITE);
+
         float speed = 8.0f;
         if (IsKeyDown(KEY_D))
         {
