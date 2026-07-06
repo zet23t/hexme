@@ -10,6 +10,7 @@ typedef struct {
     Model hex_grass;    
     Model hex_water;    
     Model pawns[2];    
+    Model pawn_shadow;    
     Model confirs[3];    
 
 } game_assets_t;

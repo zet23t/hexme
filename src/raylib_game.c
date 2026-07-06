@@ -289,6 +289,8 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
 
     float ang = atan2f(pawn->direction.x, pawn->direction.z);
     DrawModelEx(g_assets.pawns[pawn->model], pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    pos.y = 0.1f;
+    DrawModelEx(g_assets.pawn_shadow, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
 }
 
 game_state_t g_game;
