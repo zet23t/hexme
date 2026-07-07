@@ -293,6 +293,23 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
     DrawModelEx(g_assets.pawn_shadow, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
 }
 
+void draw_hex_outline(Vector3 center, float radius, Color color)
+{
+    for (float f = 0.0f; f <= 6.0f; f++)
+    {
+        float a1 = f / 3.0f * PI;
+        float a2 = (f+1.0f) / 3.0f * PI;
+        float dx1 = sinf(a1) * radius;
+        float dy1 = cosf(a1) * radius;
+        float dx2 = sinf(a2) * radius;
+        float dy2 = cosf(a2) * radius;
+        DrawLine3D(
+            (Vector3){center.x + dx1, center.y, center.z + dy1},
+            (Vector3){center.x + dx2, center.y, center.z + dy2}, color
+        );
+    }
+}
+
 game_state_t g_game;
 // Update and draw game frame
 static void UpdateDrawFrame(void)
@@ -332,6 +349,7 @@ static void UpdateDrawFrame(void)
         camera.target = Vector3Lerp(camera.target, g_game.player_pawn.current_pos, dt);
         camera.position = Vector3Add(camera.target, (Vector3){0.0f, 50.0f, -30.0f});
 
+        
         BeginMode3D(camera);
         // DrawModel(g_assets.confirs[0], (Vector3){-3.0f, 0.0f, -0.5f}, 1.0f, WHITE);
         SetRandomSeed(312);
@@ -431,6 +449,27 @@ static void UpdateDrawFrame(void)
             }
             pawn_update(dt, &g_game.npcs[i]);
         }
+
+        Ray mouse_ray = GetScreenToWorldRay(GetMousePosition(), camera);
+        float hdist = mouse_ray.position.y / -mouse_ray.direction.y;
+        Vector3 ground_pos = {
+            mouse_ray.position.x + mouse_ray.direction.x * hdist,
+            mouse_ray.position.y + mouse_ray.direction.y * hdist,
+            mouse_ray.position.z + mouse_ray.direction.z * hdist,
+        };
+
+        DrawSphere(ground_pos, 0.5f, RED);
+
+        Vector3 hex_pos = ground_pos;
+        int hy = (int)roundf(hex_pos.z / HEX_Y);
+        offset = (hy % 2 * 0.5f);
+        int hx = (int)roundf(hex_pos.x / HEX_X - offset);
+        hex_pos = (Vector3){HEX_X*(offset + hx), 0.0f, HEX_Y * hy};
+
+        hex_pos.y +=0.05f;
+        
+        draw_hex_outline(hex_pos, HEX_X * 0.5f, WHITE);
+        
 
         EndMode3D();
 
