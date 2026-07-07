@@ -15,12 +15,19 @@ typedef struct {
 } tri_hex_t;
 
 typedef struct {
+    Model body;
+    Model hand;
+} pawn_t;
+
+typedef struct {
     Texture2D modelAtlas;
     Model hex_grass;    
     Model hex_water;    
-    Model pawns[2];
+    pawn_t pawns[2];
     Model pawn_shadow;    
     Model confirs[3];    
+    Model rocks[4];
+    int rocks_count;    
 
     tri_hex_t tri_hexes[32];
     int tri_hex_count;

@@ -24,12 +24,18 @@ void assets_load(void)
     SetTextureFilter(g_assets.modelAtlas, TEXTURE_FILTER_BILINEAR);
     g_assets.hex_grass = load_model("h_grass");
     g_assets.hex_water = load_model("h_water");
-    g_assets.pawns[0] = load_model("pawn");
-    g_assets.pawns[1] = load_model("pawn-2");
+    g_assets.pawns[0].body = load_model("pawn");
+    g_assets.pawns[0].hand = load_model("pawn_hand");
+    g_assets.pawns[1].body = load_model("pawn-2");
+    g_assets.pawns[1].hand = load_model("pawn_hand");
+
     g_assets.pawn_shadow = load_model("pawn-shadow");
     g_assets.confirs[0] = load_model("prop_confir-1");
     g_assets.confirs[1] = load_model("prop_confir-2");
     g_assets.confirs[2] = load_model("prop_confir-3");
+
+    g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock");
+    g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock.001");
 
     int tcnt = 0;
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_grass_000", MAP_TYPE_GRASS, MAP_TYPE_GRASS, MAP_TYPE_GRASS);

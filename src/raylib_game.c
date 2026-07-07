@@ -242,6 +242,7 @@ typedef struct
     Vector3 target_pos;
     Vector3 direction;
     float transition;
+    int step;
     float size;
     int model;
 } pawn_pos_t;
@@ -278,6 +279,7 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
         pawn->current_pos = pawn->next_pos;
         pawn->next_pos = Vector3MoveTowards(pawn->next_pos, pawn->target_pos, PAWN_JUMP_DIST * size);
         pawn->transition = 0.0f;
+        pawn->step ++;
     }
 
     float dist = Vector3Distance(pawn->current_pos, pawn->next_pos);
@@ -288,8 +290,21 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
     float jmp = sin(pawn->transition * PI) * dist;
     pos.y += jmp;
 
-    float ang = atan2f(pawn->direction.x, pawn->direction.z);
-    DrawModelEx(g_assets.pawns[pawn->model], pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    float odd = (pawn->step & 1) * 2.0f - 1.0f;
+    float ang = atan2f(pawn->direction.x, pawn->direction.z) - odd * 0.05f;
+    DrawModelEx(g_assets.pawns[pawn->model].body, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    Vector3 right = {-cos(ang), 0.0f, sin(ang)};
+    Vector3 forward = {sin(ang), 0.0f, cos(ang)};
+    float rv = size * .5f;
+    float frv = size * (.4f + odd * .2f * jmp);
+    float flv = size * (.4f - odd * .2f * jmp);
+    float hry = -jmp * .1f * odd;
+    float hly = jmp * .1f * odd;
+    Vector3 right_hand_pos = {right.x * rv + forward.x * frv + pos.x, hry + size * .05f, right.z * rv + pos.z + forward.z * frv};
+    Vector3 left_hand_pos = {-right.x * rv + forward.x * flv + pos.x, hly + size * .05f, -right.z * rv + pos.z + forward.z * flv};
+    DrawModelEx(g_assets.pawns[pawn->model].hand, right_hand_pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    DrawModelEx(g_assets.pawns[pawn->model].hand, left_hand_pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+
     pos.y = 0.1f;
     DrawModelEx(g_assets.pawn_shadow, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
 }
@@ -314,6 +329,7 @@ typedef struct
 {
     uint8_t center, corners[6];
     int conifer_count;
+    int rock_count;
 } hex_cell_t;
 game_state_t g_game;
 
@@ -378,7 +394,7 @@ static void UpdateDrawFrame(void)
         if (map == 0)
         {
             map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
-            map[32 + mapW * 32].conifer_count = 4;
+            // map[32 + mapW * 32].conifer_count = 4;
             for (int x = 0; x < mapW; x++)
             {
                 for (int y = 0; y < mapH; y++)
@@ -388,15 +404,78 @@ static void UpdateDrawFrame(void)
                         0.0f,
                         (y + 32) * HEX_Y,
                     };
-                    float freq = 0.002f;
-                    float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5);
+                    float freq = 0.012f;
+                    float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5) - 0.15f;
                     if (f < -0.3f)
                     {
                         int idx = x + mapW * y;
                         map[idx].center = MAP_TYPE_WATER;
                         for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_WATER;
                     }
+                    if (f > -0.28f)
+                    {
+                        int idx = x + mapW * y;
+                        float tfreq = freq * 6.0f;
+                        float tf = stb_perlin_fbm_noise3(hex_pos.x * tfreq,hex_pos.z * tfreq,2.0f,2.0f,0.5f,3);
+                        if (tf > -0.3f)
+                        {
+                            map[idx].conifer_count = (f + 0.3f) * 80;
+                            if (map[idx].conifer_count > 25) map[idx].conifer_count = 25;
+                        }
+                        else
+                        {
+                            map[idx].rock_count = (f + 0.3f) * 50;
+                        }
+                    }
 
+                }
+            }
+            for (int x = 0; x < mapW; x++)
+            {
+                for (int y = 0; y < mapH; y++)
+                {
+                    int idx = x + mapW * y;
+                    if (x < mapW - 1)
+                    {
+                        int right = (x + 1) + mapW * y;
+                        if ((map[idx].center == MAP_TYPE_GRASS && map[right].center == MAP_TYPE_WATER) ||
+                            (map[idx].center == MAP_TYPE_WATER && map[right].center == MAP_TYPE_GRASS))
+                        {
+                            map[idx].corners[4] = MAP_TYPE_MUD;
+                            map[idx].corners[3] = MAP_TYPE_MUD;
+                            map[right].corners[0] = MAP_TYPE_MUD;
+                            map[right].corners[1] = MAP_TYPE_MUD;
+                        }
+                    }
+                    if (y > 0)
+                    {
+                        int top_left_x = (x + ((y + 1) & 1) - 1);
+                        if (top_left_x > 0 && top_left_x < mapW)
+                        {
+                            int top_left = top_left_x + mapW * (y - 1);
+                            if ((map[idx].center == MAP_TYPE_GRASS && map[top_left].center == MAP_TYPE_WATER) ||
+                                (map[idx].center == MAP_TYPE_WATER && map[top_left].center == MAP_TYPE_GRASS))
+                            {
+                                map[idx].corners[0] = MAP_TYPE_MUD;
+                                map[idx].corners[5] = MAP_TYPE_MUD;
+                                map[top_left].corners[2] = MAP_TYPE_MUD;
+                                map[top_left].corners[3] = MAP_TYPE_MUD;
+                            }
+                        }
+                        int top_right_x = top_left_x + 1;
+                        if (top_right_x < mapW)
+                        {
+                            int top_right = top_right_x + mapW * (y - 1);
+                            if ((map[idx].center == MAP_TYPE_GRASS && map[top_right].center == MAP_TYPE_WATER) ||
+                                (map[idx].center == MAP_TYPE_WATER && map[top_right].center == MAP_TYPE_GRASS))
+                            {
+                                map[idx].corners[4] = MAP_TYPE_MUD;
+                                map[idx].corners[5] = MAP_TYPE_MUD;
+                                map[top_right].corners[2] = MAP_TYPE_MUD;
+                                map[top_right].corners[1] = MAP_TYPE_MUD;
+                            }
+                        }
+                    }
                 }
             }
             
@@ -450,6 +529,7 @@ static void UpdateDrawFrame(void)
                 }
             }
 
+            SetRandomSeed(x + y * 1283);
             for (int c = 0; c < cell.conifer_count; c++)
             {
                 repeat:
@@ -463,6 +543,21 @@ static void UpdateDrawFrame(void)
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
                 DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                    (Vector3){width, height, width}, WHITE);
+            }
+            for (int c = 0; c < cell.rock_count; c++)
+            {
+                repeat_rocks:
+                float dx = GetRandomValue(-1000,1000) * 0.001f;
+                float dy = GetRandomValue(-1000,1000) * 0.001f;
+                if (dx*dx+dy*dy > 1.0f) goto repeat_rocks;
+                Vector3 pos = hex_pos;
+                pos.x += dx * HEX_X * 0.4f;
+                pos.z += dy * HEX_Y * 0.4f;
+                float height = GetRandomValue(7,12) * 0.07f;
+                float width = (GetRandomValue(-2,2) * 0.1f) + height;
+            
+                DrawModelEx(g_assets.rocks[GetRandomValue(0, g_assets.rocks_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
             }
         }
