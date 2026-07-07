@@ -36,5 +36,9 @@ void assets_load(void)
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_grass_mud_001", MAP_TYPE_GRASS, MAP_TYPE_GRASS, MAP_TYPE_MUD);
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_grass_mud_010", MAP_TYPE_GRASS, MAP_TYPE_MUD, MAP_TYPE_GRASS);
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_grass_mud_011", MAP_TYPE_GRASS, MAP_TYPE_MUD, MAP_TYPE_MUD);
-    
+    g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_000", MAP_TYPE_WATER, MAP_TYPE_WATER, MAP_TYPE_WATER);
+    g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_mud_001", MAP_TYPE_WATER, MAP_TYPE_WATER, MAP_TYPE_MUD);
+    g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_mud_011", MAP_TYPE_WATER, MAP_TYPE_MUD, MAP_TYPE_MUD);
+    g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_mud_010", MAP_TYPE_WATER, MAP_TYPE_MUD, MAP_TYPE_WATER);
+    g_assets.tri_hex_count = tcnt;
 }

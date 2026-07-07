@@ -22,8 +22,8 @@ typedef struct {
     Model pawn_shadow;    
     Model confirs[3];    
 
-    tri_hex_t tri_hexes[8];
-
+    tri_hex_t tri_hexes[32];
+    int tri_hex_count;
 } game_assets_t;
 
 extern game_assets_t g_assets;

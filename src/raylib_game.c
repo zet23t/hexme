@@ -12,6 +12,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include <math.h>
+#include <inttypes.h>
 #include "screens.h"    // NOTE: Declares global (extern) variables and screens functions
 #include "assets.h"
 
@@ -309,8 +310,15 @@ void draw_hex_outline(Vector3 center, float radius, Color color)
         );
     }
 }
-
+typedef struct 
+{
+    uint8_t center, corners[6];
+    int conifer_count;
+} hex_cell_t;
 game_state_t g_game;
+
+float stb_perlin_fbm_noise3(float x, float y, float z, float lacunarity, float gain, int octaves);
+
 // Update and draw game frame
 static void UpdateDrawFrame(void)
 {
@@ -361,38 +369,94 @@ static void UpdateDrawFrame(void)
         //     DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
         //         (Vector3){width, height, width}, WHITE);
         // }
-        const char *map = 
-            "g g g f f f "
-            " g g g g f f"
-            "g g g g g g "
-            " g g g g g g"
-            "g g g g g w "
-            " g g w w w w"
-            "g g w w w w "
-            ;
-        int mapW = 6;
-        float offset = 0.0f;
-        for (int i = 0, x = 0, y = 0; map[i]; i++)
+        #define G MAP_TYPE_GRASS
+        #define M MAP_TYPE_MUD
+        #define W MAP_TYPE_WATER
+        static hex_cell_t *map = 0;
+        const int mapW = 64, mapH = 64;
+
+        if (map == 0)
         {
-            Model model = {0};
-            int confirCount = 0;
-            switch (map[i])
+            map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
+            map[32 + mapW * 32].conifer_count = 4;
+            for (int x = 0; x < mapW; x++)
             {
-                default: continue;
-                case 'g': model = g_assets.hex_grass; break;
-                case 'w': model = g_assets.hex_water; break;
-                case 'f': model = g_assets.hex_grass, confirCount = 5; break;
+                for (int y = 0; y < mapH; y++)
+                {
+                    Vector3 hex_pos ={
+                        (x + 0.5f * (y & 1) + 32) * HEX_X,
+                        0.0f,
+                        (y + 32) * HEX_Y,
+                    };
+                    float freq = 0.002f;
+                    float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5);
+                    if (f < -0.3f)
+                    {
+                        int idx = x + mapW * y;
+                        map[idx].center = MAP_TYPE_WATER;
+                        for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_WATER;
+                    }
+
+                }
             }
             
-            Vector3 pos = (Vector3){HEX_X*(offset - x), 0.0f, -HEX_Y * y};
-            DrawModel(model, pos, 1.0f, WHITE);
-            for (int cf = 0; cf < confirCount; cf++)
+        }
+        // {
+        //     {G, {G, G, M, M, M, G}, 3}, {G, {M, M, G, G, G, M}}, {G, {G, G, G, G, G, G}},
+        //     {G, {G, M, M, M, M, G}, 15}, {G, {M, M, M, M, G, M}}, {G, {G, M, M, M, G, G}},
+        //     {W, {M, W, W, W, M, M}}, {W, {M, W, W, W, M, M}}, {W, {M, W, W, W, W, M}},
+
+        // } 
+        Ray center = GetScreenToWorldRay((Vector2){GetScreenWidth()/2, GetScreenHeight()/2}, camera);
+        float cdist = center.position.y / -center.direction.y;
+        Vector3 camcen = {
+            center.position.x + center.direction.x * cdist,
+            center.position.y + center.direction.y * cdist,
+            center.position.z + center.direction.z * cdist,
+        };
+        for (int i = 0; i < mapW * mapH; i++)
+        {
+            hex_cell_t cell = map[i];
+            int x = -i % mapW;
+            int y = -i / mapW;
+            Vector3 hex_pos ={
+                (x + 0.5f * (y & 1) + 32) * HEX_X,
+                0.0f,
+                (y + 32) * HEX_Y,
+            };
+            float cdx = (hex_pos.x - camcen.x) / HEX_X;
+            float cdy = (hex_pos.z - camcen.z) / HEX_Y;
+            if (cdx > 10 || cdx < -10 || cdy < -10 || cdy > 10)
+            {
+                continue;
+            }
+            for (int c = 0; c < 6; c++)
+            {
+                int ca = cell.corners[c];
+                int cb = cell.corners[(c + 1) % 6];
+                tri_hex_t *match = 0;
+                for (int t = 0; t < g_assets.tri_hex_count; t++)
+                {
+                    tri_hex_t *th = &g_assets.tri_hexes[t];
+                    if (th->center == cell.center && th->corner_a == ca && th->corner_b == cb)
+                    {
+                        match = th;
+                        break;
+                    }
+                }
+                if (match)
+                {
+                    DrawModelEx(match->model,hex_pos, (Vector3){0.0f, 1.0f, 0.0f}, c * 60, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
+                }
+            }
+
+            for (int c = 0; c < cell.conifer_count; c++)
             {
                 repeat:
-                float dx = GetRandomValue(-100,100) * 0.005f;
-                float dy = GetRandomValue(-100,100) * 0.005f;
+                float dx = GetRandomValue(-1000,1000) * 0.001f;
+                float dy = GetRandomValue(-1000,1000) * 0.001f;
                 if (dx*dx+dy*dy > 1.0f) goto repeat;
-                
+                Vector3 pos = hex_pos;
                 pos.x += dx * HEX_X * 0.4f;
                 pos.z += dy * HEX_Y * 0.4f;
                 float height = GetRandomValue(7,12) * 0.07f;
@@ -401,15 +465,7 @@ static void UpdateDrawFrame(void)
                 DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
             }
-            if (++x == mapW)
-            {
-                x = 0;
-                if ((y++ & 1) == 0) offset = 0.5f;
-                else offset = 0.0f;
-            }
         }
-        // DrawModel(g_assets.hex_grass, (Vector3){0}, 1.0f, WHITE);
-        // DrawModel(g_assets.hex_grass, (Vector3){HEX_X, 0.0f, 0.0f}, 1.0f, WHITE);
 
         float speed = 8.0f;
         if (IsKeyDown(KEY_D))
@@ -462,12 +518,12 @@ static void UpdateDrawFrame(void)
 
         Vector3 hex_pos = ground_pos;
         int hy = (int)roundf(hex_pos.z / HEX_Y);
-        offset = (hy % 2 * 0.5f);
+        float offset = (hy % 2 * 0.5f);
         int hx = (int)roundf(hex_pos.x / HEX_X - offset);
         hex_pos = (Vector3){HEX_X*(offset + hx), 0.0f, HEX_Y * hy};
 
         hex_pos.y +=0.05f;
-        
+
         draw_hex_outline(hex_pos, HEX_X * 0.5f, WHITE);
         
 
