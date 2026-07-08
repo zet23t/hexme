@@ -45,6 +45,7 @@ void assets_load(void)
     g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-4");
     g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-stump");
     g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-dead");
+    
 
     g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock");
     g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock.001");
@@ -61,4 +62,6 @@ void assets_load(void)
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_mud_011", MAP_TYPE_WATER, MAP_TYPE_MUD, MAP_TYPE_MUD);
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_water_mud_010", MAP_TYPE_WATER, MAP_TYPE_MUD, MAP_TYPE_WATER);
     g_assets.tri_hex_count = tcnt;
+
+    g_assets.crate = load_model("crate");
 }

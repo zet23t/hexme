@@ -13,6 +13,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <math.h>
+#include "box3d/box3d.h"
 #include <inttypes.h>
 #include "screens.h"    // NOTE: Declares global (extern) variables and screens functions
 #include "assets.h"
@@ -239,6 +240,7 @@ static void DrawTransition(void)
 
 typedef struct 
 {
+    b3BodyId kinematic;
     Vector3 current_pos, next_pos;
     Vector3 target_pos;
     Vector3 direction;
@@ -308,6 +310,12 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
 
     pos.y = 0.1f;
     DrawModelEx(g_assets.pawn_shadow, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+
+	if ( pawn->kinematic.index1 )
+    {
+
+        b3Body_SetTargetTransform( pawn->kinematic, (b3WorldTransform) { (b3Vec3){pos.x, pos.y, pos.z}, b3Quat_identity }, 1.0f/60.0f, true );
+    }
 }
 
 void draw_hex_outline(Vector3 center, float radius, Color color)
@@ -329,14 +337,55 @@ void draw_hex_outline(Vector3 center, float radius, Color color)
 typedef struct 
 {
     uint8_t center, corners[6];
-    int tree_count;
-    int conifer_count;
-    int rock_count;
-    int high_grass_count;
+    uint32_t tree_bits;
+    uint32_t conifer_bits;
+    uint32_t rock_bits;
+    uint32_t high_grass_bits;
 } hex_cell_t;
 game_state_t g_game;
 
 float stb_perlin_fbm_noise3(float x, float y, float z, float lacunarity, float gain, int octaves);
+
+
+// Source - https://stackoverflow.com/a/20117209
+// Posted by Roman Reiner, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-07-08, License - CC BY-SA 3.0
+
+int is_inside_hexagon(float x, float y)
+{
+    // Check length (squared) against inner and outer radius
+    float l2 = x * x + y * y;
+    if (l2 > 1.0f) return false;
+    if (l2 < 0.75f) return true; // (sqrt(3)/2)^2 = 3/4
+
+    // Check against borders
+    float px = x * 1.15470053838f; // 2/sqrt(3)
+    if (px > 1.0f || px < -1.0f) return false;
+
+    float py = 0.5f * px + y;
+    if (py > 1.0f || py < -1.0f) return false;
+
+    if (px - py > 1.0f || px - py < -1.0f) return false;
+
+    return true;
+}
+
+uint32_t get_random_bits(int count, int max_count)
+{
+    if (count > max_count) count = max_count;
+    count = GetRandomValue(count / 2, count);
+    if (count > 31) return 0xffffffff;
+    uint32_t bits = 0;
+    while (count > 0)
+    {
+        int select = GetRandomValue(0, 31);
+        if ((bits >> select) & 1) continue;
+        bits |= 1 << select;
+        count--;
+    }
+    return bits;
+}
+
 
 // Update and draw game frame
 static void UpdateDrawFrame(void)
@@ -399,9 +448,62 @@ static void UpdateDrawFrame(void)
         #define W MAP_TYPE_WATER
         static hex_cell_t *map = 0;
         const int mapW = 64, mapH = 64;
+        static b3WorldDef worldDef;
+        static b3WorldId worldId;
+        
+        static b3BodyId bodyIds[20];
+        // random points inside a hex
+        static Vector2 hex_points[32];
+        const float hex_point_min_dist_sq = 0.2f * 0.2f;
 
         if (map == 0)
         {
+            SetRandomSeed(123);
+            for (int i = 0; i < 32; i++)
+            {
+                retry:
+                float dx = (float) GetRandomValue(-1000, 1000) / 1000.0f;
+                float dy = (float) GetRandomValue(-1000, 1000) / 1000.0f;
+                if (!is_inside_hexagon(dx, dy)) goto retry;
+                hex_points[i] = (Vector2){dx, dy};
+                for (int j = 0; j < i; j++)
+                {
+                    if (Vector2DistanceSqr(hex_points[i], hex_points[j]) < hex_point_min_dist_sq)
+                    {
+                        goto retry;
+                    }
+                }
+            }
+
+            worldDef = b3DefaultWorldDef();
+            worldDef.gravity = (b3Vec3){ 0.0f, -8.0f, 0.0f };
+            worldId = b3CreateWorld(&worldDef);
+            b3BodyDef groundBodyDef = b3DefaultBodyDef();
+            groundBodyDef.position = (b3Vec3){ 0.0f, -10.0f, 0.0f };
+            b3BodyId groundId = b3CreateBody(worldId, &groundBodyDef);
+            b3BoxHull groundBox = b3MakeBoxHull(5000.0f, 10.0f, 5000.0f);
+            b3ShapeDef groundShapeDef = b3DefaultShapeDef();
+            groundShapeDef.baseMaterial.restitution = 0.1f;
+            groundShapeDef.baseMaterial.friction = 0.8f;
+            b3CreateHullShape(groundId, &groundShapeDef, &groundBox.base);
+
+            for (int i = 0; i < 20; i++)
+            {
+                b3BodyDef bodyDef = b3DefaultBodyDef();
+                bodyDef.type = b3_dynamicBody;
+                bodyDef.position = (b3Vec3){ 0.0f, 14.0f + i * 1.5f, 0.0f };
+                bodyIds[i] = b3CreateBody(worldId, &bodyDef);
+                b3BoxHull dynamicBox = b3MakeCubeHull(0.5f);
+    
+                b3ShapeDef shapeDef = b3DefaultShapeDef();
+                shapeDef.density = 1.0f;
+                shapeDef.baseMaterial.restitution = 0.1f;
+                shapeDef.baseMaterial.friction = 0.8f;
+    
+                b3CreateHullShape(bodyIds[i], &shapeDef, &dynamicBox.base);
+                
+            }
+
             map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
             // map[32 + mapW * 32].conifer_count = 4;
             for (int x = 0; x < mapW; x++)
@@ -416,13 +518,17 @@ static void UpdateDrawFrame(void)
                     float dist = Vector3Length(hex_pos);
                     float freq = 0.012f;
                     float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5) - 0.15f - dist * 0.003f;
+                    int idx = x + mapW * y;
                     if (f < -0.3f)
                     {
-                        int idx = x + mapW * y;
                         map[idx].center = MAP_TYPE_WATER;
                         for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_WATER;
                     }
-                    int idx = x + mapW * y;
+                    else
+                    {
+                        map[idx].center = MAP_TYPE_GRASS;
+                        for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_GRASS;
+                    }
                     if (f > -0.32f)
                     {
                         float tfreq = freq * 6.0f;
@@ -431,35 +537,28 @@ static void UpdateDrawFrame(void)
                         {
                             if (tf > -0.15f)
                             {
-                                map[idx].conifer_count = (f + 0.3f) * 80;
-                                if (map[idx].conifer_count > 7) map[idx].conifer_count = 7;
-                                map[idx].conifer_count = GetRandomValue(map[idx].conifer_count / 2, map[idx].conifer_count);
+                                map[idx].conifer_bits = get_random_bits((f + 0.3f) * 80, 7);
                             }
                             else
                             {
-                                map[idx].tree_count = (f + 0.3f) * 80;
-                                if (map[idx].tree_count > 7) map[idx].tree_count = 7;
-                                map[idx].tree_count = GetRandomValue(map[idx].tree_count / 2, map[idx].tree_count);
+                                map[idx].tree_bits = get_random_bits((f + 0.3f) * 80, 7);
                                 
                             }
-                            map[idx].high_grass_count = GetRandomValue(0,3);
+                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,3), 3);
                         }
                         else if (tf < -0.5f)
                         {
-                            map[idx].rock_count = (f + 0.3f) * 50;
-                            if (map[idx].rock_count > 7) map[idx].rock_count = 7;
-                            map[idx].rock_count = GetRandomValue(map[idx].rock_count / 2, map[idx].rock_count);
-                            map[idx].high_grass_count = GetRandomValue(0,8);
+                            map[idx].rock_bits = get_random_bits((f + 0.3f) * 50, 7);
+                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,8), 8);
                         }
                         else if (map[idx].center == MAP_TYPE_GRASS)
                         {
-
-                            map[idx].high_grass_count = GetRandomValue(2,12);
+                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
                         }
                     }
                     else if (map[idx].center == MAP_TYPE_GRASS)
                     {
-                        map[idx].high_grass_count = GetRandomValue(2,12);
+                        map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
                     }
 
                 }
@@ -547,6 +646,23 @@ static void UpdateDrawFrame(void)
             };
             printf(">> %f %f : %d %d\n", hex_pos.x, hex_pos.z, closest_x, closest_y);
             g_game.player_pawn.current_pos = g_game.player_pawn.next_pos = g_game.player_pawn.target_pos = hex_pos;
+
+
+
+            b3BodyDef bodyDef = b3DefaultBodyDef();
+            bodyDef.type = b3_kinematicBody;
+            bodyDef.position = (b3Vec3){ hex_pos.x, hex_pos.y, hex_pos.z };
+            
+            g_game.player_pawn.kinematic = b3CreateBody(worldId, &bodyDef);
+            float linkRadius = 0.25f;
+            float linkExtent = 0.85f;
+            b3Capsule capsule = { { 0.0f, linkRadius, 0.0f }, { 0.0f, linkExtent, 0.0f }, linkRadius };
+
+            b3ShapeDef shapeDef = b3DefaultShapeDef();
+            shapeDef.density = 1.0f;
+            shapeDef.baseMaterial.restitution = 0.1f;
+            shapeDef.baseMaterial.friction = 0.8f;
+            b3CreateCapsuleShape( g_game.player_pawn.kinematic, &shapeDef, &capsule );    
         }
         // {
         //     {G, {G, G, M, M, M, G}, 3}, {G, {M, M, G, G, G, M}}, {G, {G, G, G, G, G, G}},
@@ -598,19 +714,28 @@ static void UpdateDrawFrame(void)
                 {
                     DrawModelEx(match->model,hex_pos, (Vector3){0.0f, 1.0f, 0.0f}, c * 60, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
                 }
+                else
+                {
+                    DrawCube(hex_pos, 1,1,1, RED);
+                    printf("%d\n",g_assets.tri_hex_count);
+                    // DrawModelEx(g_assets.tri_hexes[6].model,hex_pos, (Vector3){0.0f, 1.0f, 0.0f}, c * 60, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
+                    
+                }
+            }
+
+            for (int i = 0; i < 32; i++)
+            {
+                DrawCube((Vector3){hex_points[i].x * HEX_X * .5f - HEX_X * 2, 0, hex_points[i].y * HEX_Y * .5f + HEX_Y * 2}, 0.1f, 0.2f, 0.1f, GREEN);
             }
 
             SetRandomSeed(x + y * 1283);
-            for (int c = 0; c < cell.tree_count; c++)
+            for (int c = 0; c < 32; c++)
             {
-                repeat_trees:
+                if ((cell.tree_bits >> c & 1) == 0) continue;
 
-                float dx = GetRandomValue(-1000,1000) * 0.001f;
-                float dy = GetRandomValue(-1000,1000) * 0.001f;
-                if (dx*dx+dy*dy > 1.0f) goto repeat_trees;
                 Vector3 pos = hex_pos;
-                pos.x += dx * HEX_X * 0.4f;
-                pos.z += dy * HEX_Y * 0.4f;
+                pos.x += hex_points[c].x * HEX_X * 0.5f;
+                pos.z += hex_points[c].y * HEX_Y * 0.5f;
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
@@ -622,15 +747,13 @@ static void UpdateDrawFrame(void)
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int c = 0; c < cell.conifer_count; c++)
+            for (int c = 0; c < 32; c++)
             {
-                repeat:
-                float dx = GetRandomValue(-1000,1000) * 0.001f;
-                float dy = GetRandomValue(-1000,1000) * 0.001f;
-                if (dx*dx+dy*dy > 1.0f) goto repeat;
+                if ((cell.conifer_bits >> c & 1) == 0) continue;
+
                 Vector3 pos = hex_pos;
-                pos.x += dx * HEX_X * 0.4f;
-                pos.z += dy * HEX_Y * 0.4f;
+                pos.x += hex_points[c].x * HEX_X * 0.5f;
+                pos.z += hex_points[c].y * HEX_Y * 0.5f;
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
@@ -642,15 +765,14 @@ static void UpdateDrawFrame(void)
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int c = 0; c < cell.rock_count; c++)
+            for (int c = 0; c < 32; c++)
             {
-                repeat_rocks:
-                float dx = GetRandomValue(-1000,1000) * 0.001f;
-                float dy = GetRandomValue(-1000,1000) * 0.001f;
-                if (dx*dx+dy*dy > 1.0f) goto repeat_rocks;
+                if ((cell.rock_bits >> c & 1) == 0) continue;
+
                 Vector3 pos = hex_pos;
-                pos.x += dx * HEX_X * 0.4f;
-                pos.z += dy * HEX_Y * 0.4f;
+                pos.x += hex_points[c].x * HEX_X * 0.5f;
+                pos.z += hex_points[c].y * HEX_Y * 0.5f;
+
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
@@ -661,21 +783,41 @@ static void UpdateDrawFrame(void)
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int g = 0; g < cell.high_grass_count;g++)
+            for (int g = 0; g < 32;g++)
             {
-                repeat_grass:
-                float dx = GetRandomValue(-1000,1000) * 0.001f;
-                float dy = GetRandomValue(-1000,1000) * 0.001f;
-                if (dx*dx+dy*dy > 1.0f) goto repeat_grass;
+                if ((cell.high_grass_bits >> g & 1) == 0) continue;
+
                 Vector3 pos = hex_pos;
-                pos.x += dx * HEX_X * 0.4f;
-                pos.z += dy * HEX_Y * 0.4f;
+                pos.x += hex_points[g].x * HEX_X * 0.5f;
+                pos.z += hex_points[g].y * HEX_Y * 0.5f;
+
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
                 DrawModelEx(g_assets.high_grass[GetRandomValue(0, g_assets.high_grass_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
             }
+        }
+
+        static float accumulator = 0;
+        const float sim_hz = 1.0f/60.0f;
+        accumulator += dt;
+        while (accumulator > sim_hz)
+        {
+            accumulator -= sim_hz;
+
+            b3World_Step(worldId, sim_hz, 4);
+
+        }
+
+        for (int i = 0; i < 20; i++)
+        {
+            b3BodyId bodyId = bodyIds[i];
+            b3Vec3 position = b3Body_GetPosition(bodyId);
+            b3Quat rotation = b3Body_GetRotation(bodyId);
+            float angle;
+            b3Vec3 axis = b3GetAxisAngle(&angle, rotation);
+            DrawModelEx(g_assets.crate, (Vector3){position.x, position.y, position.z}, (Vector3){axis.x, axis.y, axis.z}, angle * RAD2DEG, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
         }
 
         rlDisableDepthMask();

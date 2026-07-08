@@ -45,6 +45,8 @@ typedef struct {
     Model pawn_shadow;    
     Model tree_shadow;    
 
+    Model crate;
+
     Model conifirs[14];    
     int conifir_count;
     
@@ -57,11 +59,12 @@ typedef struct {
     Model high_grass[8];
     int high_grass_count;
 
+    tri_hex_t tri_hexes[32];
+    int tri_hex_count;
+
     biome_def_t biome_defs[MAX_BIOME_DEFS];
     int biome_def_count;
 
-    tri_hex_t tri_hexes[32];
-    int tri_hex_count;
 } game_assets_t;
 
 extern game_assets_t g_assets;

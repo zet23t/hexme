@@ -4,6 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
+                "${workspaceFolder}/src/deps/box3d/include",
                 "${workspaceFolder}/../raylib/src"
             ],
             "defines": [],

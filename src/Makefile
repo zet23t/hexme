@@ -39,7 +39,57 @@ PROJECT_SOURCE_FILES  ?= \
     screen_title.c \
     screen_options.c \
     screen_gameplay.c \
-    screen_ending.c
+    screen_ending.c \
+    deps/box3d/src/aabb.c \
+    deps/box3d/src/arena_allocator.c \
+    deps/box3d/src/bitset.c \
+    deps/box3d/src/block_allocator.c \
+    deps/box3d/src/body.c \
+    deps/box3d/src/broad_phase.c \
+    deps/box3d/src/capsule.c \
+    deps/box3d/src/compound.c \
+    deps/box3d/src/constraint_graph.c \
+    deps/box3d/src/contact.c \
+    deps/box3d/src/contact_solver.c \
+    deps/box3d/src/convex_manifold.c \
+    deps/box3d/src/core.c \
+    deps/box3d/src/distance.c \
+    deps/box3d/src/distance_joint.c \
+    deps/box3d/src/dynamic_tree.c \
+    deps/box3d/src/height_field.c \
+    deps/box3d/src/hull.c \
+    deps/box3d/src/id_pool.c \
+    deps/box3d/src/island.c \
+    deps/box3d/src/joint.c \
+    deps/box3d/src/manifold.c \
+    deps/box3d/src/math_functions.c \
+    deps/box3d/src/mesh.c \
+    deps/box3d/src/mesh_contact.c \
+    deps/box3d/src/motor_joint.c \
+    deps/box3d/src/mover.c \
+    deps/box3d/src/name_cache.c \
+    deps/box3d/src/parallel_for.c \
+    deps/box3d/src/parallel_joint.c \
+    deps/box3d/src/physics_world.c \
+    deps/box3d/src/prismatic_joint.c \
+    deps/box3d/src/recording.c \
+    deps/box3d/src/recording_replay.c \
+    deps/box3d/src/revolute_joint.c \
+    deps/box3d/src/scheduler.c \
+    deps/box3d/src/sensor.c \
+    deps/box3d/src/shape.c \
+    deps/box3d/src/simd.c \
+    deps/box3d/src/solver.c \
+    deps/box3d/src/solver_set.c \
+    deps/box3d/src/sphere.c \
+    deps/box3d/src/spherical_joint.c \
+    deps/box3d/src/table.c \
+    deps/box3d/src/timer.c \
+    deps/box3d/src/triangle_manifold.c \
+    deps/box3d/src/types.c \
+    deps/box3d/src/weld_joint.c \
+    deps/box3d/src/wheel_joint.c \
+    deps/box3d/src/world_snapshot.c \
 
 # raylib library variables
 RAYLIB_PATH           ?= C:\raylib\raylib
@@ -157,14 +207,16 @@ endif
 #  -Wno-missing-braces  ignore invalid warning (GCC bug 53119)
 #  -Wno-unused-value    ignore unused return values of some functions (i.e. fread())
 #  -D_DEFAULT_SOURCE    use with -std=c99 on Linux and PLATFORM_WEB, required for timespec
-CFLAGS = -Wall -D_DEFAULT_SOURCE -Wno-missing-braces -Wno-unused-value -Wno-unused-result -Wno-pointer-sign $(PROJECT_CUSTOM_FLAGS)
+CFLAGS = -Wall -D_DEFAULT_SOURCE -Wno-missing-braces -Wno-unused-value -Wno-unused-result -Wno-pointer-sign $(PROJECT_CUSTOM_FLAGS) 
 #CFLAGS += -Wextra -Wmissing-prototypes -Wstrict-prototypes
 
-ifeq ($(PLATFORM),PLATFORM_WEB)
-    CFLAGS += -std=gnu99
-else
-    CFLAGS += -std=c99
-endif
+#ifeq ($(PLATFORM),PLATFORM_WEB)
+#    CFLAGS += -std=gnu99
+#else
+#    CFLAGS += -std=c99
+# endif
+
+CFLAGS += -std=c11
 
 ifeq ($(BUILD_MODE),DEBUG)
     CFLAGS += -g -D_DEBUG
@@ -189,7 +241,7 @@ endif
 
 # Define include paths for required headers: INCLUDE_PATHS
 #------------------------------------------------------------------------------------------------
-INCLUDE_PATHS += -I. -Iexternal -I$(RAYLIB_INCLUDE_PATH)
+INCLUDE_PATHS += -I. -Iexternal -I$(RAYLIB_INCLUDE_PATH) -Ideps/box3d/include
 
 # Define additional directories containing required header files
 ifeq ($(PLATFORM),PLATFORM_DRM)
