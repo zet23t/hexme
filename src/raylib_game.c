@@ -11,6 +11,7 @@
 ********************************************************************************************/
 #include "raylib.h"
 #include "raymath.h"
+#include "rlgl.h"
 #include <math.h>
 #include <inttypes.h>
 #include "screens.h"    // NOTE: Declares global (extern) variables and screens functions
@@ -48,8 +49,8 @@ Sound fxCoin = { 0 };
 //----------------------------------------------------------------------------------
 // Global Variables Definition (local to this module)
 //----------------------------------------------------------------------------------
-static const int screenWidth = 800;
-static const int screenHeight = 450;
+static const int screenWidth = 720;
+static const int screenHeight = 720;
 
 // Required variables to manage screen transitions (fade-in, fade-out)
 static float transAlpha = 0.0f;
@@ -291,7 +292,7 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
     pos.y += jmp;
 
     float odd = (pawn->step & 1) * 2.0f - 1.0f;
-    float ang = atan2f(pawn->direction.x, pawn->direction.z) - odd * 0.05f;
+    float ang = atan2f(pawn->direction.x, pawn->direction.z) - odd * 0.05f * dist;
     DrawModelEx(g_assets.pawns[pawn->model].body, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
     Vector3 right = {-cos(ang), 0.0f, sin(ang)};
     Vector3 forward = {sin(ang), 0.0f, cos(ang)};
@@ -328,8 +329,10 @@ void draw_hex_outline(Vector3 center, float radius, Color color)
 typedef struct 
 {
     uint8_t center, corners[6];
+    int tree_count;
     int conifer_count;
     int rock_count;
+    int high_grass_count;
 } hex_cell_t;
 game_state_t g_game;
 
@@ -369,20 +372,26 @@ static void UpdateDrawFrame(void)
             .projection = CAMERA_PERSPECTIVE,
             .up = {0.0f, 1.0f, 0.0f}
         };
-
+        static float cam_dist = 100.0f;
+        float cam_zoom_speed = 20.0f;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) cam_zoom_speed = 60.0f;
+        if (IsKeyDown(KEY_O)) cam_dist = cam_dist + dt * cam_zoom_speed;
+        if (IsKeyDown(KEY_I)) cam_dist = cam_dist - dt * cam_zoom_speed;
+        cam_dist = Clamp(cam_dist, 50.0f, 400.0f);
+        Vector3 cam_dir = Vector3Normalize((Vector3){0.0f, 50.0f,-30.0f});
         camera.target = Vector3Lerp(camera.target, g_game.player_pawn.current_pos, dt);
-        camera.position = Vector3Add(camera.target, (Vector3){0.0f, 50.0f, -30.0f});
+        camera.position = Vector3Add(camera.target, Vector3Scale(cam_dir, cam_dist));
 
         
         BeginMode3D(camera);
-        // DrawModel(g_assets.confirs[0], (Vector3){-3.0f, 0.0f, -0.5f}, 1.0f, WHITE);
+        // DrawModel(g_assets.conifirs[0], (Vector3){-3.0f, 0.0f, -0.5f}, 1.0f, WHITE);
         SetRandomSeed(312);
         // for (int i = 0; i < 30; i++)
         // {
         //     Vector3 pos = {GetRandomValue(-100, 100) * 0.1f + 7.0f, 0, GetRandomValue(-100, 100) * 0.1f + 3.0f};
         //     float height = GetRandomValue(7,12) * 0.1f;
         //     float width = (GetRandomValue(-2,2) * 0.1f) + height;
-        //     DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+        //     DrawModelEx(g_assets.conifirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
         //         (Vector3){width, height, width}, WHITE);
         // }
         #define G MAP_TYPE_GRASS
@@ -400,32 +409,57 @@ static void UpdateDrawFrame(void)
                 for (int y = 0; y < mapH; y++)
                 {
                     Vector3 hex_pos ={
-                        (x + 0.5f * (y & 1) + 32) * HEX_X,
+                        (x + 0.5f * (y & 1) - 32) * HEX_X,
                         0.0f,
-                        (y + 32) * HEX_Y,
+                        (y - 32) * HEX_Y,
                     };
+                    float dist = Vector3Length(hex_pos);
                     float freq = 0.012f;
-                    float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5) - 0.15f;
+                    float f = stb_perlin_fbm_noise3(hex_pos.x * freq,hex_pos.z * freq,1.0f,2.0f,0.5f,5) - 0.15f - dist * 0.003f;
                     if (f < -0.3f)
                     {
                         int idx = x + mapW * y;
                         map[idx].center = MAP_TYPE_WATER;
                         for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_WATER;
                     }
-                    if (f > -0.28f)
+                    int idx = x + mapW * y;
+                    if (f > -0.32f)
                     {
-                        int idx = x + mapW * y;
                         float tfreq = freq * 6.0f;
                         float tf = stb_perlin_fbm_noise3(hex_pos.x * tfreq,hex_pos.z * tfreq,2.0f,2.0f,0.5f,3);
                         if (tf > -0.3f)
                         {
-                            map[idx].conifer_count = (f + 0.3f) * 80;
-                            if (map[idx].conifer_count > 25) map[idx].conifer_count = 25;
+                            if (tf > -0.15f)
+                            {
+                                map[idx].conifer_count = (f + 0.3f) * 80;
+                                if (map[idx].conifer_count > 7) map[idx].conifer_count = 7;
+                                map[idx].conifer_count = GetRandomValue(map[idx].conifer_count / 2, map[idx].conifer_count);
+                            }
+                            else
+                            {
+                                map[idx].tree_count = (f + 0.3f) * 80;
+                                if (map[idx].tree_count > 7) map[idx].tree_count = 7;
+                                map[idx].tree_count = GetRandomValue(map[idx].tree_count / 2, map[idx].tree_count);
+                                
+                            }
+                            map[idx].high_grass_count = GetRandomValue(0,3);
                         }
-                        else
+                        else if (tf < -0.5f)
                         {
                             map[idx].rock_count = (f + 0.3f) * 50;
+                            if (map[idx].rock_count > 7) map[idx].rock_count = 7;
+                            map[idx].rock_count = GetRandomValue(map[idx].rock_count / 2, map[idx].rock_count);
+                            map[idx].high_grass_count = GetRandomValue(0,8);
                         }
+                        else if (map[idx].center == MAP_TYPE_GRASS)
+                        {
+
+                            map[idx].high_grass_count = GetRandomValue(2,12);
+                        }
+                    }
+                    else if (map[idx].center == MAP_TYPE_GRASS)
+                    {
+                        map[idx].high_grass_count = GetRandomValue(2,12);
                     }
 
                 }
@@ -479,6 +513,40 @@ static void UpdateDrawFrame(void)
                 }
             }
             
+
+            // find a pawn spawn pos: some beach close to the map center
+
+            int closest_dist = 0xffffff;
+            int closest_x = 32, closest_y = 32;
+            for (int x = 0; x < mapW; x++)
+            {
+                for (int y = 0; y < mapH; y++)
+                {
+                    int dx = x - mapW / 2;
+                    int dy = y - mapH / 2;
+                    int dist = dx * dx + dy * dy;
+                    if (dist > closest_dist) continue;
+
+                    int idx = x + mapW * y;
+                    
+                    if (map[idx].center != MAP_TYPE_GRASS) continue;
+                    int beach_count = 0;
+                    for (int c = 0; c < 6; c++) beach_count += map[idx].corners[c] == MAP_TYPE_MUD;
+                    if (beach_count >0 && beach_count < 3) {
+                        closest_x = x;
+                        closest_y = y;
+                        closest_dist = dist;
+                    }
+                }
+            }
+
+            Vector3 hex_pos ={
+                ((closest_x - 32.5f) + 0.5f * (closest_y & 1) ) * HEX_X,
+                0.0f,
+                (closest_y - 32.5f) * HEX_Y,
+            };
+            printf(">> %f %f : %d %d\n", hex_pos.x, hex_pos.z, closest_x, closest_y);
+            g_game.player_pawn.current_pos = g_game.player_pawn.next_pos = g_game.player_pawn.target_pos = hex_pos;
         }
         // {
         //     {G, {G, G, M, M, M, G}, 3}, {G, {M, M, G, G, G, M}}, {G, {G, G, G, G, G, G}},
@@ -493,6 +561,9 @@ static void UpdateDrawFrame(void)
             center.position.y + center.direction.y * cdist,
             center.position.z + center.direction.z * cdist,
         };
+        #define MAX_SHADOW_COUNT 1024
+        static Vector4 shadows[MAX_SHADOW_COUNT];
+        int shadow_count = 0;
         for (int i = 0; i < mapW * mapH; i++)
         {
             hex_cell_t cell = map[i];
@@ -530,6 +601,27 @@ static void UpdateDrawFrame(void)
             }
 
             SetRandomSeed(x + y * 1283);
+            for (int c = 0; c < cell.tree_count; c++)
+            {
+                repeat_trees:
+
+                float dx = GetRandomValue(-1000,1000) * 0.001f;
+                float dy = GetRandomValue(-1000,1000) * 0.001f;
+                if (dx*dx+dy*dy > 1.0f) goto repeat_trees;
+                Vector3 pos = hex_pos;
+                pos.x += dx * HEX_X * 0.4f;
+                pos.z += dy * HEX_Y * 0.4f;
+                float height = GetRandomValue(7,12) * 0.07f;
+                float width = (GetRandomValue(-2,2) * 0.1f) + height;
+            
+                DrawModelEx(g_assets.trees[GetRandomValue(0, g_assets.tree_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                    (Vector3){width, height, width}, WHITE);
+                
+                if (shadow_count < MAX_SHADOW_COUNT)
+                {
+                    shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
+                }
+            }
             for (int c = 0; c < cell.conifer_count; c++)
             {
                 repeat:
@@ -542,8 +634,13 @@ static void UpdateDrawFrame(void)
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
-                DrawModelEx(g_assets.confirs[GetRandomValue(0, 2)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                DrawModelEx(g_assets.conifirs[GetRandomValue(0, g_assets.conifir_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
+                
+                if (shadow_count < MAX_SHADOW_COUNT)
+                {
+                    shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
+                }
             }
             for (int c = 0; c < cell.rock_count; c++)
             {
@@ -559,8 +656,35 @@ static void UpdateDrawFrame(void)
             
                 DrawModelEx(g_assets.rocks[GetRandomValue(0, g_assets.rocks_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
+                if (shadow_count < MAX_SHADOW_COUNT)
+                {
+                    shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
+                }
+            }
+            for (int g = 0; g < cell.high_grass_count;g++)
+            {
+                repeat_grass:
+                float dx = GetRandomValue(-1000,1000) * 0.001f;
+                float dy = GetRandomValue(-1000,1000) * 0.001f;
+                if (dx*dx+dy*dy > 1.0f) goto repeat_grass;
+                Vector3 pos = hex_pos;
+                pos.x += dx * HEX_X * 0.4f;
+                pos.z += dy * HEX_Y * 0.4f;
+                float height = GetRandomValue(7,12) * 0.07f;
+                float width = (GetRandomValue(-2,2) * 0.1f) + height;
+            
+                DrawModelEx(g_assets.high_grass[GetRandomValue(0, g_assets.high_grass_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                    (Vector3){width, height, width}, WHITE);
             }
         }
+
+        rlDisableDepthMask();
+        for (int i = 0; i < shadow_count; i++)
+        {
+            Vector4 v = shadows[i];
+            DrawModel(g_assets.tree_shadow, (Vector3){v.x, v.y + 0.1f, v.z}, v.w * 1.2f, WHITE);
+        }
+        rlEnableDepthMask();
 
         float speed = 8.0f;
         if (IsKeyDown(KEY_D))

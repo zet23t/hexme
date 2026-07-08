@@ -30,12 +30,26 @@ void assets_load(void)
     g_assets.pawns[1].hand = load_model("pawn_hand");
 
     g_assets.pawn_shadow = load_model("pawn-shadow");
-    g_assets.confirs[0] = load_model("prop_confir-1");
-    g_assets.confirs[1] = load_model("prop_confir-2");
-    g_assets.confirs[2] = load_model("prop_confir-3");
+    g_assets.tree_shadow = load_model("prop_tree_shadow");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-1");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-2");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-1a");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-2a");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-3");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-4");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_tree-stump");
+
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-1");
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-2");
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-3");
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-4");
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-stump");
+    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-dead");
 
     g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock");
     g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock.001");
+
+    g_assets.high_grass[g_assets.high_grass_count++] = load_model("prop-high-grass");
 
     int tcnt = 0;
     g_assets.tri_hexes[tcnt++] = load_tri_hex("t_grass_000", MAP_TYPE_GRASS, MAP_TYPE_GRASS, MAP_TYPE_GRASS);
