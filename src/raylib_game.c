@@ -337,10 +337,11 @@ void draw_hex_outline(Vector3 center, float radius, Color color)
 typedef struct 
 {
     uint8_t center, corners[6];
-    uint32_t tree_bits;
-    uint32_t conifer_bits;
-    uint32_t rock_bits;
-    uint32_t high_grass_bits;
+    uint8_t physics_initialized;
+    uint16_t tree_bits;
+    uint16_t conifer_bits;
+    uint16_t rock_bits;
+    uint16_t high_grass_bits;
 } hex_cell_t;
 game_state_t g_game;
 
@@ -370,15 +371,17 @@ int is_inside_hexagon(float x, float y)
     return true;
 }
 
+#define HEX_POINT_COUNT 12
+
 uint32_t get_random_bits(int count, int max_count)
 {
     if (count > max_count) count = max_count;
     count = GetRandomValue(count / 2, count);
-    if (count > 31) return 0xffffffff;
+    if (count >= HEX_POINT_COUNT) return 0xffffffff;
     uint32_t bits = 0;
     while (count > 0)
     {
-        int select = GetRandomValue(0, 31);
+        int select = GetRandomValue(0, HEX_POINT_COUNT - 1);
         if ((bits >> select) & 1) continue;
         bits |= 1 << select;
         count--;
@@ -451,15 +454,17 @@ static void UpdateDrawFrame(void)
         static b3WorldDef worldDef;
         static b3WorldId worldId;
         
-        static b3BodyId bodyIds[20];
+        static b3BodyId bodyIds[120];
+        static int bodyIdCount = 0;
         // random points inside a hex
-        static Vector2 hex_points[32];
-        const float hex_point_min_dist_sq = 0.2f * 0.2f;
+        static Vector2 hex_points[HEX_POINT_COUNT];
+        const float hex_point_min_dist_sq = 0.4f * 0.4f;
+        static b3BodyId groundId;
 
         if (map == 0)
         {
             SetRandomSeed(123);
-            for (int i = 0; i < 32; i++)
+            for (int i = 0; i < HEX_POINT_COUNT; i++)
             {
                 retry:
                 float dx = (float) GetRandomValue(-1000, 1000) / 1000.0f;
@@ -479,9 +484,9 @@ static void UpdateDrawFrame(void)
             worldDef.gravity = (b3Vec3){ 0.0f, -8.0f, 0.0f };
             worldId = b3CreateWorld(&worldDef);
             b3BodyDef groundBodyDef = b3DefaultBodyDef();
-            groundBodyDef.position = (b3Vec3){ 0.0f, -10.0f, 0.0f };
-            b3BodyId groundId = b3CreateBody(worldId, &groundBodyDef);
-            b3BoxHull groundBox = b3MakeBoxHull(5000.0f, 10.0f, 5000.0f);
+            groundBodyDef.position = (b3Vec3){ 0.0f, 0.0f, 0.0f };
+            groundId = b3CreateBody(worldId, &groundBodyDef);
+            b3BoxHull groundBox = b3MakeOffsetBoxHull(5000.0f, 10.0f, 5000.0f, (b3Vec3){0.0f, -10.0f, 0.0f});
             b3ShapeDef groundShapeDef = b3DefaultShapeDef();
             groundShapeDef.baseMaterial.restitution = 0.1f;
             groundShapeDef.baseMaterial.friction = 0.8f;
@@ -501,7 +506,7 @@ static void UpdateDrawFrame(void)
                 shapeDef.baseMaterial.friction = 0.8f;
     
                 b3CreateHullShape(bodyIds[i], &shapeDef, &dynamicBox.base);
-                
+                bodyIdCount++;
             }
 
             map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
@@ -729,25 +734,38 @@ static void UpdateDrawFrame(void)
             }
 
             SetRandomSeed(x + y * 1283);
-            for (int c = 0; c < 32; c++)
+            for (int c = 0; c < HEX_POINT_COUNT; c++)
             {
                 if ((cell.tree_bits >> c & 1) == 0) continue;
-
                 Vector3 pos = hex_pos;
                 pos.x += hex_points[c].x * HEX_X * 0.5f;
                 pos.z += hex_points[c].y * HEX_Y * 0.5f;
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
-            
-                DrawModelEx(g_assets.trees[GetRandomValue(0, g_assets.tree_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+
+                model_data_t *m = &g_assets.trees[GetRandomValue(0, g_assets.tree_count - 1)];
+                if (!cell.physics_initialized && m->hulldata)
+                {
+                    b3ShapeDef shapeDef = b3DefaultShapeDef();
+                    b3BodyDef bdef = b3DefaultBodyDef();
+                    bdef.position.x = pos.x;
+                    bdef.position.y = pos.y;
+                    bdef.position.z = pos.z;
+                    b3BodyId body = b3CreateBody(worldId, &bdef);
+                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
+                }
+                
+                DrawModelEx(m->model, pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
+                
+                
                 
                 if (shadow_count < MAX_SHADOW_COUNT)
                 {
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int c = 0; c < 32; c++)
+            for (int c = 0; c < HEX_POINT_COUNT; c++)
             {
                 if ((cell.conifer_bits >> c & 1) == 0) continue;
 
@@ -757,7 +775,21 @@ static void UpdateDrawFrame(void)
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
             
-                DrawModelEx(g_assets.conifirs[GetRandomValue(0, g_assets.conifir_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+
+                model_data_t *m = &g_assets.conifirs[GetRandomValue(0, g_assets.conifir_count - 1)];
+                if (!cell.physics_initialized && m->hulldata)
+                {
+                    b3ShapeDef shapeDef = b3DefaultShapeDef();
+                    b3BodyDef bdef = b3DefaultBodyDef();
+                    bdef.position.x = pos.x;
+                    bdef.position.y = pos.y;
+                    bdef.position.z = pos.z;
+                    b3BodyId body = b3CreateBody(worldId, &bdef);
+                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
+                    
+                }
+
+                DrawModelEx(m->model, pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
                 
                 if (shadow_count < MAX_SHADOW_COUNT)
@@ -765,7 +797,7 @@ static void UpdateDrawFrame(void)
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int c = 0; c < 32; c++)
+            for (int c = 0; c < HEX_POINT_COUNT; c++)
             {
                 if ((cell.rock_bits >> c & 1) == 0) continue;
 
@@ -775,15 +807,28 @@ static void UpdateDrawFrame(void)
 
                 float height = GetRandomValue(7,12) * 0.07f;
                 float width = (GetRandomValue(-2,2) * 0.1f) + height;
+
+                
+                model_data_t *m = &g_assets.rocks[GetRandomValue(0, g_assets.rocks_count - 1)];
+                if (!cell.physics_initialized && m->hulldata)
+                {
+                    b3ShapeDef shapeDef = b3DefaultShapeDef();
+                    b3BodyDef bdef = b3DefaultBodyDef();
+                    bdef.position.x = pos.x;
+                    bdef.position.y = pos.y;
+                    bdef.position.z = pos.z;
+                    b3BodyId body = b3CreateBody(worldId, &bdef);
+                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
+                }
             
-                DrawModelEx(g_assets.rocks[GetRandomValue(0, g_assets.rocks_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
+                DrawModelEx(m->model, pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
                 if (shadow_count < MAX_SHADOW_COUNT)
                 {
                     shadows[shadow_count++] = (Vector4){pos.x, pos.y, pos.z, width};
                 }
             }
-            for (int g = 0; g < 32;g++)
+            for (int g = 0; g < HEX_POINT_COUNT;g++)
             {
                 if ((cell.high_grass_bits >> g & 1) == 0) continue;
 
@@ -797,6 +842,8 @@ static void UpdateDrawFrame(void)
                 DrawModelEx(g_assets.high_grass[GetRandomValue(0, g_assets.high_grass_count - 1)], pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
                     (Vector3){width, height, width}, WHITE);
             }
+
+            map[i].physics_initialized = 1;
         }
 
         static float accumulator = 0;
@@ -810,7 +857,7 @@ static void UpdateDrawFrame(void)
 
         }
 
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < bodyIdCount; i++)
         {
             b3BodyId bodyId = bodyIds[i];
             b3Vec3 position = b3Body_GetPosition(bodyId);
@@ -844,6 +891,26 @@ static void UpdateDrawFrame(void)
         if (IsKeyDown(KEY_S))
         {
             g_game.player_pawn.target_pos.z -= dt * speed;
+        }
+        if (IsKeyPressed(KEY_SPACE) && bodyIdCount < 120)
+        {
+
+            b3BodyDef bodyDef = b3DefaultBodyDef();
+            bodyDef.type = b3_dynamicBody;
+            bodyDef.position = (b3Vec3){ 
+                g_game.player_pawn.current_pos.x, 
+                g_game.player_pawn.current_pos.y + 5.0f,
+                g_game.player_pawn.current_pos.z
+            };
+            bodyIds[bodyIdCount] = b3CreateBody(worldId, &bodyDef);
+            b3BoxHull dynamicBox = b3MakeCubeHull(0.5f);
+
+            b3ShapeDef shapeDef = b3DefaultShapeDef();
+            shapeDef.density = 1.0f;
+            shapeDef.baseMaterial.restitution = 0.1f;
+            shapeDef.baseMaterial.friction = 0.8f;
+
+            b3CreateHullShape(bodyIds[bodyIdCount++], &shapeDef, &dynamicBox.base);
         }
         g_game.player_pawn.target_pos = Vector3MoveTowards(g_game.player_pawn.next_pos, g_game.player_pawn.target_pos, PAWN_JUMP_DIST);
         pawn_update(dt, &g_game.player_pawn);

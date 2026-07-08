@@ -2,6 +2,7 @@
 #define __ASSETS_H__
 
 #include <raylib.h>
+#include "box3d/box3d.h"
 
 typedef enum {
     MAP_TYPE_NONE,
@@ -38,6 +39,11 @@ typedef struct {
 } biome_def_t;
 
 typedef struct {
+    Model model;
+    b3HullData *hulldata;
+} model_data_t;
+
+typedef struct {
     Texture2D modelAtlas;
     Model hex_grass;    
     Model hex_water;    
@@ -47,13 +53,13 @@ typedef struct {
 
     Model crate;
 
-    Model conifirs[14];    
+    model_data_t conifirs[14];    
     int conifir_count;
     
-    Model trees[14];    
+    model_data_t trees[14];    
     int tree_count;
 
-    Model rocks[4];
+    model_data_t rocks[4];
     int rocks_count;    
 
     Model high_grass[8];

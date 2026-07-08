@@ -10,9 +10,57 @@ Model load_model(const char *path)
     return m;
 }
 
+model_data_t load_model_hull(const char *path)
+{
+    Model m = load_model(path);
+    
+    b3Vec3 *hull_points;
+    int point_count = 0;
+    for (int i = 0; i < m.meshCount; i++)
+    {
+        point_count += m.meshes[i].vertexCount;
+    }
+    hull_points = MemAlloc(sizeof(hull_points) * point_count);
+    point_count = 0;
+    // add points but weed out duplicated ones
+    for (int i = 0; i < m.meshCount; i++)
+    {
+        for (int j = 0; j < m.meshes[i].vertexCount; j++)
+        {
+            Vector3 p = {
+                m.meshes[i].vertices[j * 3],
+                m.meshes[i].vertices[j * 3 + 1],
+                m.meshes[i].vertices[j * 3 + 2],
+            };
+            for (int k = 0; k < point_count; k++)
+            {
+                float dx = p.x - hull_points[k].x;
+                float dy = p.y - hull_points[k].y;
+                float dz = p.z - hull_points[k].z;
+                float dsq = dx * dx + dy * dy + dz * dz;
+                if (dsq < 0.05f) goto ignore;
+            }
+            hull_points[point_count++] = (b3Vec3){
+                p.x, p.y, p.z
+            };
+            ignore:
+        }
+    }
+
+    b3HullData *hull = b3CreateHull(hull_points, point_count, 24);
+
+
+    MemFree(hull_points);
+    return (model_data_t){
+        .model = m,
+        .hulldata = hull,
+    };
+}
+
 tri_hex_t load_tri_hex(const char *name, map_type_e center, map_type_e a, map_type_e b)
 {
     Model m = load_model(name);
+
     return (tri_hex_t){
         .model = m, .center = center, .corner_a = a, .corner_b = b
     };
@@ -31,24 +79,24 @@ void assets_load(void)
 
     g_assets.pawn_shadow = load_model("pawn-shadow");
     g_assets.tree_shadow = load_model("prop_tree_shadow");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-1");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-2");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-1a");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-2a");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-3");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_conifir-4");
-    g_assets.conifirs[g_assets.conifir_count++] = load_model("prop_tree-stump");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-1");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-2");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-1a");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-2a");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-3");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_conifir-4");
+    g_assets.conifirs[g_assets.conifir_count++] = load_model_hull("prop_tree-stump");
 
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-1");
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-2");
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-3");
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-4");
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-stump");
-    g_assets.trees[g_assets.tree_count++] = load_model("prop_tree-dead");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-1");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-2");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-3");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-4");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-stump");
+    g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-dead");
     
 
-    g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock");
-    g_assets.rocks[g_assets.rocks_count++] = load_model("prop_rock.001");
+    g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock");
+    g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock.001");
 
     g_assets.high_grass[g_assets.high_grass_count++] = load_model("prop-high-grass");
 
