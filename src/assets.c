@@ -76,6 +76,7 @@ void assets_load(void)
     g_assets.pawns[0].hand = load_model("pawn_hand");
     g_assets.pawns[1].body = load_model("pawn-2");
     g_assets.pawns[1].hand = load_model("pawn_hand");
+    g_assets.backpack = load_model("pawn-backpack");
 
     g_assets.pawn_shadow = load_model("pawn-shadow");
     g_assets.tree_shadow = load_model("prop_tree_shadow");
@@ -94,10 +95,9 @@ void assets_load(void)
     g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-stump");
     g_assets.trees[g_assets.tree_count++] = load_model_hull("prop_tree-dead");
     
-
     g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock");
     g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock.001");
-
+    
     g_assets.high_grass[g_assets.high_grass_count++] = load_model("prop-high-grass");
 
     int tcnt = 0;

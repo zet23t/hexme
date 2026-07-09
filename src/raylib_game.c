@@ -248,7 +248,8 @@ typedef struct
     int step;
     float size;
     int model;
-} pawn_pos_t;
+    uint8_t has_backpack;
+} pawn_instance_t;
 #define PAWN_TRANSITION_T 0.2f
 #define PAWN_JUMP_DIST 0.75f
 
@@ -259,16 +260,28 @@ typedef struct
 typedef struct 
 {
     int is_initialized;
-    pawn_pos_t player_pawn;
-    pawn_pos_t npcs[NUM_NPCS];
+    pawn_instance_t player_pawn;
+    pawn_instance_t npcs[NUM_NPCS];
+    b3WorldId world_id;
 } game_state_t;
+
+typedef struct 
+{
+    uint8_t center, corners[6];
+    uint8_t physics_initialized;
+    uint16_t tree_bits;
+    uint16_t conifer_bits;
+    uint16_t rock_bits;
+    uint16_t high_grass_bits;
+} hex_cell_t;
+game_state_t g_game;
 
 float ease_in_out_sine(float t)
 {
     return -(cosf(PI * t) - 1.0f) * 0.5f;
 }
 
-static void pawn_update(float dt, pawn_pos_t *pawn)
+static void pawn_update(float dt, pawn_instance_t *pawn)
 {
     float size = pawn->size;
 
@@ -279,8 +292,27 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
     }
     else
     {
+        b3Capsule mover;
+        mover.center1 = (b3Vec3){ 0.0f, 0.35f, 0.0f };  // bottom sphere center
+        mover.center2 = (b3Vec3){ 0.0f, 1.45f, 0.0f };  // top sphere center
+        mover.radius  = 0.2f * size;
+        Vector3 next_pos = Vector3MoveTowards(pawn->next_pos, pawn->target_pos, PAWN_JUMP_DIST * size);
+        Vector3 delta = Vector3Subtract(next_pos, pawn->next_pos);
+
+        float frac = b3World_CastMover(g_game.world_id, (b3Vec3){pawn->next_pos.x, pawn->next_pos.y + 0.5f, pawn->next_pos.z},
+            &mover, (b3Vec3){delta.x, delta.y, delta.z}, (b3QueryFilter){.categoryBits = -1, .maskBits = -1}, NULL, NULL);
+        frac += 0.2f;
+        if (frac < 1.0f)
+        {
+            if (frac < 0.3f)
+            {
+                next_pos = pawn->next_pos;
+            }
+            else next_pos = Vector3Add(pawn->next_pos, Vector3Scale(delta, frac));
+        }
+
         pawn->current_pos = pawn->next_pos;
-        pawn->next_pos = Vector3MoveTowards(pawn->next_pos, pawn->target_pos, PAWN_JUMP_DIST * size);
+        pawn->next_pos = next_pos;
         pawn->transition = 0.0f;
         pawn->step ++;
     }
@@ -296,6 +328,12 @@ static void pawn_update(float dt, pawn_pos_t *pawn)
     float odd = (pawn->step & 1) * 2.0f - 1.0f;
     float ang = atan2f(pawn->direction.x, pawn->direction.z) - odd * 0.05f * dist;
     DrawModelEx(g_assets.pawns[pawn->model].body, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    if (pawn->has_backpack)
+    {
+        DrawModelEx(g_assets.backpack, pos, (Vector3){0.0f,1.0f,0.0f}, ang * RAD2DEG, (Vector3){size, size, size}, WHITE);
+    }
+
+
     Vector3 right = {-cos(ang), 0.0f, sin(ang)};
     Vector3 forward = {sin(ang), 0.0f, cos(ang)};
     float rv = size * .5f;
@@ -334,16 +372,6 @@ void draw_hex_outline(Vector3 center, float radius, Color color)
         );
     }
 }
-typedef struct 
-{
-    uint8_t center, corners[6];
-    uint8_t physics_initialized;
-    uint16_t tree_bits;
-    uint16_t conifer_bits;
-    uint16_t rock_bits;
-    uint16_t high_grass_bits;
-} hex_cell_t;
-game_state_t g_game;
 
 float stb_perlin_fbm_noise3(float x, float y, float z, float lacunarity, float gain, int octaves);
 
@@ -400,7 +428,7 @@ static void UpdateDrawFrame(void)
         {
             Vector3 pos = {GetRandomValue(-100, 100) * 0.1f, 0, GetRandomValue(-100, 100) * 0.1f};
             g_game.npcs[i] = 
-            (pawn_pos_t) {
+            (pawn_instance_t) {
                 .current_pos = pos,
                 .next_pos = pos,
                 .target_pos = pos,
@@ -483,6 +511,7 @@ static void UpdateDrawFrame(void)
             worldDef = b3DefaultWorldDef();
             worldDef.gravity = (b3Vec3){ 0.0f, -8.0f, 0.0f };
             worldId = b3CreateWorld(&worldDef);
+            g_game.world_id = worldId;
             b3BodyDef groundBodyDef = b3DefaultBodyDef();
             groundBodyDef.position = (b3Vec3){ 0.0f, 0.0f, 0.0f };
             groundId = b3CreateBody(worldId, &groundBodyDef);
@@ -651,7 +680,8 @@ static void UpdateDrawFrame(void)
             };
             printf(">> %f %f : %d %d\n", hex_pos.x, hex_pos.z, closest_x, closest_y);
             g_game.player_pawn.current_pos = g_game.player_pawn.next_pos = g_game.player_pawn.target_pos = hex_pos;
-
+            
+            g_game.player_pawn.has_backpack = 1;
 
 
             b3BodyDef bodyDef = b3DefaultBodyDef();
@@ -752,7 +782,9 @@ static void UpdateDrawFrame(void)
                     bdef.position.y = pos.y;
                     bdef.position.z = pos.z;
                     b3BodyId body = b3CreateBody(worldId, &bdef);
-                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
+                    b3Transform t = b3Transform_identity;
+                    
+                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, t, (b3Vec3){width * .7f, height, width * .7f});
                 }
                 
                 DrawModelEx(m->model, pos, (Vector3){0, 1.0f, 0}, GetRandomValue(0, 360),
@@ -785,7 +817,7 @@ static void UpdateDrawFrame(void)
                     bdef.position.y = pos.y;
                     bdef.position.z = pos.z;
                     b3BodyId body = b3CreateBody(worldId, &bdef);
-                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
+                    b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width*.7f, height, width*.7f});
                     
                 }
 

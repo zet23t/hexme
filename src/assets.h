@@ -48,8 +48,11 @@ typedef struct {
     Model hex_grass;    
     Model hex_water;    
     pawn_t pawns[2];
+
     Model pawn_shadow;    
     Model tree_shadow;    
+
+    Model backpack;
 
     Model crate;
 
