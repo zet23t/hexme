@@ -10,6 +10,7 @@ Model load_model(const char *path)
     return m;
 }
 
+
 model_data_t load_model_hull(const char *path)
 {
     Model m = load_model(path);

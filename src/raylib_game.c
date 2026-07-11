@@ -935,7 +935,7 @@ static void UpdateDrawFrame(void)
             };
             float cdx = (hex_pos.x - camcen.x) / HEX_X;
             float cdy = (hex_pos.z - camcen.z) / HEX_Y;
-            if (cdx > 10 || cdx < -10 || cdy < -10 || cdy > 10)
+            if (cdx > 4 || cdx < -4 || cdy < -4 || cdy > 4)
             {
                 continue;
             }
