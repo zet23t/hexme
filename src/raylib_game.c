@@ -47,6 +47,18 @@ Font font = { 0 };
 Music music = { 0 };
 Sound fxCoin = { 0 };
 
+typedef enum {
+    GROUP_INTERACTIBLE = 1
+} collision_group_t;
+
+typedef enum {
+    UD_TREE = 1,
+    UD_CONIFER,
+    UD_LOG,
+    UD_ROCK,
+    UD_ROCKITEM,
+} userdata_info_t;
+
 //----------------------------------------------------------------------------------
 // Global Variables Definition (local to this module)
 //----------------------------------------------------------------------------------
@@ -238,9 +250,19 @@ static void DrawTransition(void)
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, transAlpha));
 }
 
+typedef union {
+    struct {
+        uint32_t type:4;
+        uint32_t subid:5;
+        uint32_t id:20;
+    };
+    uint32_t raw;
+} body_userdata_t;
+
 typedef struct 
 {
     b3BodyId kinematic;
+    b3ShapeId forward_sensor;
     Vector3 current_pos, next_pos;
     Vector3 target_pos;
     Vector3 direction;
@@ -248,7 +270,7 @@ typedef struct
     int step;
     float size;
     int model;
-    uint8_t has_backpack;
+    uint8_t has_backpack:1, action:1;
 } pawn_instance_t;
 #define PAWN_TRANSITION_T 0.2f
 #define PAWN_JUMP_DIST 0.75f
@@ -257,13 +279,32 @@ typedef struct
 #define HEX_Y 6.0f
 
 #define NUM_NPCS 4
+
+typedef struct 
+{
+    int active;
+    b3BodyId body;
+    b3ShapeId shape;
+    Vector3 scale;
+} entity_t;
+
+typedef struct 
+{
+    entity_t *entities;
+    int entities_capacity;
+    int entities_count;
+} entity_list_t;
+
 typedef struct 
 {
     int is_initialized;
     pawn_instance_t player_pawn;
     pawn_instance_t npcs[NUM_NPCS];
     b3WorldId world_id;
+    entity_list_t logs;
+    entity_list_t rock_items;
 } game_state_t;
+
 
 typedef struct 
 {
@@ -275,6 +316,126 @@ typedef struct
     uint16_t high_grass_bits;
 } hex_cell_t;
 game_state_t g_game;
+
+void entity_list_draw_all(entity_list_t *list, Model *model)
+{
+    for (int i = 0; i < list->entities_count; i++)
+    {
+        if (!list->entities[i].active) continue;
+        entity_t *e = &list->entities[i];
+        if (!b3Body_IsValid(e->body))
+        {
+            e->active = 0;
+            continue;
+        }
+        b3BodyId bodyId = e->body;
+        b3Vec3 position = b3Body_GetPosition(bodyId);
+        b3Quat rotation = b3Body_GetRotation(bodyId);
+        float angle;
+        b3Vec3 axis = b3GetAxisAngle(&angle, rotation);
+        rlPushMatrix();
+        rlTranslatef(position.x, position.y, position.z);
+        rlRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+        DrawModelEx(*model, (Vector3){0, 0, 0}, (Vector3){axis.x, axis.y, axis.z}, 0.0f * RAD2DEG, e->scale, WHITE);
+        rlPopMatrix();
+        
+        rlPushMatrix();
+        rlTranslatef(position.x, 0.05f, position.z);
+        rlScalef(e->scale.x, 0.0f, e->scale.z);
+        rlRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
+        DrawModelEx(*model, (Vector3){0,0,0}, (Vector3){0.0f, axis.y, 0.0f}, 0.0f * RAD2DEG, 
+            (Vector3){1.15f, 1.15f, 1.15f}, (Color){0, 0, 0, 40});
+        rlPopMatrix();
+
+    }
+}
+
+entity_t* entity_list_add_entity(entity_list_t *list, Vector3 position, Vector3 axis, float radians, Vector3 scale, userdata_info_t type, b3ShapeDef shape, b3HullData *hulldata)
+{
+    int index = -1;
+    for (int i = 0; i < list->entities_count; i++)
+    {
+        if (!list->entities[i].active)
+        {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0)
+    {
+        if (list->entities_count >= list->entities_capacity)
+        {
+            list->entities_capacity = list->entities_capacity + 64;
+            list->entities = MemRealloc(list->entities, sizeof(entity_t) * list->entities_capacity);
+        }
+        index = list->entities_count++;
+    }
+    body_userdata_t ud = {
+        .type = UD_LOG,
+        .id = index
+    };
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = (b3Vec3){ 
+        position.x, 
+        position.y,
+        position.z
+    };
+    bodyDef.rotation = b3MakeQuatFromAxisAngle((b3Vec3){axis.x, axis.y, axis.z}, radians);
+    bodyDef.userData = (void*)ud.raw;
+    entity_t *entity = &list->entities[index];
+    entity->active = 1;
+    entity->body = b3CreateBody(g_game.world_id, &bodyDef);
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.density = 1.0f;
+    shapeDef.baseMaterial.restitution = 0.1f;
+    shapeDef.baseMaterial.friction = 0.8f;
+    shapeDef.userData = (void*)ud.raw;
+    entity->scale = scale;
+    entity->shape = b3CreateTransformedHullShape(entity->body, &shapeDef, hulldata, b3Transform_identity, 
+        (b3Vec3){scale.x, scale.y, scale.z});
+}
+
+float randf(float min, float max)
+{
+    return GetRandomValue(min * 1000, max * 1000) / 1000.0f; 
+}
+
+void world_spawn_entities(Vector3 world_pos, int count, entity_list_t *list, model_data_t *model, userdata_info_t ud)
+{
+    for (int i = 0; i < count; i++)
+    {
+        b3ShapeDef shapedef = b3DefaultShapeDef();
+        shapedef.enableSensorEvents = 1;
+        Vector3 pos = {
+            world_pos.x + randf(-0.25f, 0.25f),
+            world_pos.y + randf(-0.25f, 0.25f),
+            world_pos.z + randf(-0.25f, 0.25f),
+        };
+        Vector3 axis = Vector3Normalize((Vector3){
+            randf(-1.0f, 1.0f),
+            randf(-1.0f, 1.0f),
+            randf(-1.0f, 1.0f),
+        });
+
+        float radians = randf(-PI, PI);
+        Vector3 scale = {randf(0.4f, 0.6f), randf(0.4f, 0.6f), randf(0.4f, 0.6f)};
+        entity_list_add_entity(list, pos, axis, radians, scale, ud, shapedef, model->hulldata);
+    }
+}
+
+void world_spawn_logs(Vector3 world_pos, int count)
+{
+    world_spawn_entities(world_pos, count, &g_game.logs, &g_assets.log, UD_LOG);
+}
+
+void world_spawn_rock_items(Vector3 world_pos, int count)
+{
+    world_spawn_entities(world_pos, count, &g_game.rock_items, &g_assets.rock_item, UD_ROCKITEM);
+}
+
+static hex_cell_t *g_map = 0;
 
 float ease_in_out_sine(float t)
 {
@@ -317,6 +478,7 @@ static void pawn_update(float dt, pawn_instance_t *pawn)
         pawn->step ++;
     }
 
+
     float dist = Vector3Distance(pawn->current_pos, pawn->next_pos);
     Vector3 dir = Vector3Normalize(Vector3Subtract(pawn->next_pos, pawn->current_pos));
     pawn->direction = Vector3Lerp(pawn->direction, dir, dt * 8.0f);
@@ -353,7 +515,48 @@ static void pawn_update(float dt, pawn_instance_t *pawn)
     {
 
         b3Body_SetTargetTransform( pawn->kinematic, (b3WorldTransform) { (b3Vec3){pos.x, pos.y, pos.z}, b3Quat_identity }, 1.0f/60.0f, true );
+
+        int capacity = b3Shape_GetSensorCapacity(pawn->forward_sensor);
+        b3ShapeId overlaps[64] = {0};
+        int count = b3Shape_GetSensorData(pawn->forward_sensor, overlaps, capacity);
+        for (int i = 0; i < count; i++)
+        {
+            b3ShapeId visitorId = overlaps[i];
+            // Ensure the visitorId is valid
+            if (b3Shape_IsValid(visitorId) == false)
+            {
+                continue;
+            }
+            body_userdata_t userdata = {.raw =(uint32_t) b3Shape_GetUserData(visitorId)};
+            if(userdata.type == UD_TREE)
+            {
+                b3Vec3 pos = b3Body_GetPosition(b3Shape_GetBody(visitorId));
+                world_spawn_logs((Vector3){pos.x, pos.y, pos.z}, 3);
+                b3DestroyShape(visitorId, 0);
+                g_map[userdata.id].tree_bits &= ~(1<<userdata.subid);
+            }
+            else 
+            if(userdata.type == UD_CONIFER)
+            {
+                b3Vec3 pos = b3Body_GetPosition(b3Shape_GetBody(visitorId));
+                world_spawn_logs((Vector3){pos.x, pos.y, pos.z}, 3);
+                b3DestroyShape(visitorId, 0);
+                g_map[userdata.id].conifer_bits &= ~(1<<userdata.subid);
+
+                // printf("unkonwn %d %d %d\n",userdata.type, userdata.id, userdata.subid);
+            }
+            else if (userdata.type == UD_ROCK)
+            {
+                b3Vec3 pos = b3Body_GetPosition(b3Shape_GetBody(visitorId));
+                b3DestroyShape(visitorId, 0);
+
+                world_spawn_rock_items((Vector3){pos.x, pos.y, pos.z}, 3);
+                g_map[userdata.id].rock_bits &= ~(1<<userdata.subid);
+
+            }
+        }
     }
+
 }
 
 void draw_hex_outline(Vector3 center, float radius, Color color)
@@ -477,7 +680,6 @@ static void UpdateDrawFrame(void)
         #define G MAP_TYPE_GRASS
         #define M MAP_TYPE_MUD
         #define W MAP_TYPE_WATER
-        static hex_cell_t *map = 0;
         const int mapW = 64, mapH = 64;
         static b3WorldDef worldDef;
         static b3WorldId worldId;
@@ -489,7 +691,7 @@ static void UpdateDrawFrame(void)
         const float hex_point_min_dist_sq = 0.4f * 0.4f;
         static b3BodyId groundId;
 
-        if (map == 0)
+        if (g_map == 0)
         {
             SetRandomSeed(123);
             for (int i = 0; i < HEX_POINT_COUNT; i++)
@@ -538,8 +740,8 @@ static void UpdateDrawFrame(void)
                 bodyIdCount++;
             }
 
-            map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
-            // map[32 + mapW * 32].conifer_count = 4;
+            g_map = MemAlloc(sizeof(hex_cell_t) * mapW * mapH);
+            // g_map[32 + mapW * 32].conifer_count = 4;
             for (int x = 0; x < mapW; x++)
             {
                 for (int y = 0; y < mapH; y++)
@@ -555,13 +757,13 @@ static void UpdateDrawFrame(void)
                     int idx = x + mapW * y;
                     if (f < -0.3f)
                     {
-                        map[idx].center = MAP_TYPE_WATER;
-                        for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_WATER;
+                        g_map[idx].center = MAP_TYPE_WATER;
+                        for (int i=0; i < 6; i+=1) g_map[idx].corners[i] = MAP_TYPE_WATER;
                     }
                     else
                     {
-                        map[idx].center = MAP_TYPE_GRASS;
-                        for (int i=0; i < 6; i+=1) map[idx].corners[i] = MAP_TYPE_GRASS;
+                        g_map[idx].center = MAP_TYPE_GRASS;
+                        for (int i=0; i < 6; i+=1) g_map[idx].corners[i] = MAP_TYPE_GRASS;
                     }
                     if (f > -0.32f)
                     {
@@ -571,28 +773,28 @@ static void UpdateDrawFrame(void)
                         {
                             if (tf > -0.15f)
                             {
-                                map[idx].conifer_bits = get_random_bits((f + 0.3f) * 80, 7);
+                                g_map[idx].conifer_bits = get_random_bits((f + 0.3f) * 80, 7);
                             }
                             else
                             {
-                                map[idx].tree_bits = get_random_bits((f + 0.3f) * 80, 7);
+                                g_map[idx].tree_bits = get_random_bits((f + 0.3f) * 80, 7);
                                 
                             }
-                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,3), 3);
+                            g_map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,3), 3);
                         }
                         else if (tf < -0.5f)
                         {
-                            map[idx].rock_bits = get_random_bits((f + 0.3f) * 50, 7);
-                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,8), 8);
+                            g_map[idx].rock_bits = get_random_bits((f + 0.3f) * 50, 7);
+                            g_map[idx].high_grass_bits = get_random_bits(GetRandomValue(0,8), 8);
                         }
-                        else if (map[idx].center == MAP_TYPE_GRASS)
+                        else if (g_map[idx].center == MAP_TYPE_GRASS)
                         {
-                            map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
+                            g_map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
                         }
                     }
-                    else if (map[idx].center == MAP_TYPE_GRASS)
+                    else if (g_map[idx].center == MAP_TYPE_GRASS)
                     {
-                        map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
+                        g_map[idx].high_grass_bits = get_random_bits(GetRandomValue(2,12), 8);
                     }
 
                 }
@@ -605,13 +807,13 @@ static void UpdateDrawFrame(void)
                     if (x < mapW - 1)
                     {
                         int right = (x + 1) + mapW * y;
-                        if ((map[idx].center == MAP_TYPE_GRASS && map[right].center == MAP_TYPE_WATER) ||
-                            (map[idx].center == MAP_TYPE_WATER && map[right].center == MAP_TYPE_GRASS))
+                        if ((g_map[idx].center == MAP_TYPE_GRASS && g_map[right].center == MAP_TYPE_WATER) ||
+                            (g_map[idx].center == MAP_TYPE_WATER && g_map[right].center == MAP_TYPE_GRASS))
                         {
-                            map[idx].corners[4] = MAP_TYPE_MUD;
-                            map[idx].corners[3] = MAP_TYPE_MUD;
-                            map[right].corners[0] = MAP_TYPE_MUD;
-                            map[right].corners[1] = MAP_TYPE_MUD;
+                            g_map[idx].corners[4] = MAP_TYPE_MUD;
+                            g_map[idx].corners[3] = MAP_TYPE_MUD;
+                            g_map[right].corners[0] = MAP_TYPE_MUD;
+                            g_map[right].corners[1] = MAP_TYPE_MUD;
                         }
                     }
                     if (y > 0)
@@ -620,26 +822,26 @@ static void UpdateDrawFrame(void)
                         if (top_left_x > 0 && top_left_x < mapW)
                         {
                             int top_left = top_left_x + mapW * (y - 1);
-                            if ((map[idx].center == MAP_TYPE_GRASS && map[top_left].center == MAP_TYPE_WATER) ||
-                                (map[idx].center == MAP_TYPE_WATER && map[top_left].center == MAP_TYPE_GRASS))
+                            if ((g_map[idx].center == MAP_TYPE_GRASS && g_map[top_left].center == MAP_TYPE_WATER) ||
+                                (g_map[idx].center == MAP_TYPE_WATER && g_map[top_left].center == MAP_TYPE_GRASS))
                             {
-                                map[idx].corners[0] = MAP_TYPE_MUD;
-                                map[idx].corners[5] = MAP_TYPE_MUD;
-                                map[top_left].corners[2] = MAP_TYPE_MUD;
-                                map[top_left].corners[3] = MAP_TYPE_MUD;
+                                g_map[idx].corners[0] = MAP_TYPE_MUD;
+                                g_map[idx].corners[5] = MAP_TYPE_MUD;
+                                g_map[top_left].corners[2] = MAP_TYPE_MUD;
+                                g_map[top_left].corners[3] = MAP_TYPE_MUD;
                             }
                         }
                         int top_right_x = top_left_x + 1;
                         if (top_right_x < mapW)
                         {
                             int top_right = top_right_x + mapW * (y - 1);
-                            if ((map[idx].center == MAP_TYPE_GRASS && map[top_right].center == MAP_TYPE_WATER) ||
-                                (map[idx].center == MAP_TYPE_WATER && map[top_right].center == MAP_TYPE_GRASS))
+                            if ((g_map[idx].center == MAP_TYPE_GRASS && g_map[top_right].center == MAP_TYPE_WATER) ||
+                                (g_map[idx].center == MAP_TYPE_WATER && g_map[top_right].center == MAP_TYPE_GRASS))
                             {
-                                map[idx].corners[4] = MAP_TYPE_MUD;
-                                map[idx].corners[5] = MAP_TYPE_MUD;
-                                map[top_right].corners[2] = MAP_TYPE_MUD;
-                                map[top_right].corners[1] = MAP_TYPE_MUD;
+                                g_map[idx].corners[4] = MAP_TYPE_MUD;
+                                g_map[idx].corners[5] = MAP_TYPE_MUD;
+                                g_map[top_right].corners[2] = MAP_TYPE_MUD;
+                                g_map[top_right].corners[1] = MAP_TYPE_MUD;
                             }
                         }
                     }
@@ -647,7 +849,7 @@ static void UpdateDrawFrame(void)
             }
             
 
-            // find a pawn spawn pos: some beach close to the map center
+            // find a pawn spawn pos: some beach close to the g_map center
 
             int closest_dist = 0xffffff;
             int closest_x = 32, closest_y = 32;
@@ -662,9 +864,9 @@ static void UpdateDrawFrame(void)
 
                     int idx = x + mapW * y;
                     
-                    if (map[idx].center != MAP_TYPE_GRASS) continue;
+                    if (g_map[idx].center != MAP_TYPE_GRASS) continue;
                     int beach_count = 0;
-                    for (int c = 0; c < 6; c++) beach_count += map[idx].corners[c] == MAP_TYPE_MUD;
+                    for (int c = 0; c < 6; c++) beach_count += g_map[idx].corners[c] == MAP_TYPE_MUD;
                     if (beach_count >0 && beach_count < 3) {
                         closest_x = x;
                         closest_y = y;
@@ -698,6 +900,12 @@ static void UpdateDrawFrame(void)
             shapeDef.baseMaterial.restitution = 0.1f;
             shapeDef.baseMaterial.friction = 0.8f;
             b3CreateCapsuleShape( g_game.player_pawn.kinematic, &shapeDef, &capsule );    
+
+            b3ShapeDef sensor = b3DefaultShapeDef();
+            sensor.density = 0.0f;
+            sensor.isSensor = 1;
+            sensor.enableSensorEvents = 1;
+            g_game.player_pawn.forward_sensor = b3CreateSphereShape(g_game.player_pawn.kinematic, &sensor, &(b3Sphere){.radius = 1.0f});
         }
         // {
         //     {G, {G, G, M, M, M, G}, 3}, {G, {M, M, G, G, G, M}}, {G, {G, G, G, G, G, G}},
@@ -717,7 +925,7 @@ static void UpdateDrawFrame(void)
         int shadow_count = 0;
         for (int i = 0; i < mapW * mapH; i++)
         {
-            hex_cell_t cell = map[i];
+            hex_cell_t cell = g_map[i];
             int x = -i % mapW;
             int y = -i / mapW;
             Vector3 hex_pos ={
@@ -767,6 +975,8 @@ static void UpdateDrawFrame(void)
             for (int c = 0; c < HEX_POINT_COUNT; c++)
             {
                 if ((cell.tree_bits >> c & 1) == 0) continue;
+                SetRandomSeed(x + y * 1283 + c);
+
                 Vector3 pos = hex_pos;
                 pos.x += hex_points[c].x * HEX_X * 0.5f;
                 pos.z += hex_points[c].y * HEX_Y * 0.5f;
@@ -777,10 +987,15 @@ static void UpdateDrawFrame(void)
                 if (!cell.physics_initialized && m->hulldata)
                 {
                     b3ShapeDef shapeDef = b3DefaultShapeDef();
+                    shapeDef.enableSensorEvents = 1;
+                    shapeDef.filter.groupIndex = GROUP_INTERACTIBLE;
                     b3BodyDef bdef = b3DefaultBodyDef();
                     bdef.position.x = pos.x;
                     bdef.position.y = pos.y;
                     bdef.position.z = pos.z;
+                    body_userdata_t ud = {.type = UD_TREE, .id = i, .subid = c};
+                    bdef.userData = (void*)ud.raw;
+                    shapeDef.userData = (void*)ud.raw;
                     b3BodyId body = b3CreateBody(worldId, &bdef);
                     b3Transform t = b3Transform_identity;
                     
@@ -801,6 +1016,8 @@ static void UpdateDrawFrame(void)
             {
                 if ((cell.conifer_bits >> c & 1) == 0) continue;
 
+                SetRandomSeed(x + y * 1285 + c);
+
                 Vector3 pos = hex_pos;
                 pos.x += hex_points[c].x * HEX_X * 0.5f;
                 pos.z += hex_points[c].y * HEX_Y * 0.5f;
@@ -816,6 +1033,12 @@ static void UpdateDrawFrame(void)
                     bdef.position.x = pos.x;
                     bdef.position.y = pos.y;
                     bdef.position.z = pos.z;
+                    
+                    body_userdata_t ud = {.type = UD_CONIFER, .id = i, .subid = c};
+                    bdef.userData = (void*)ud.raw;
+                    shapeDef.userData = (void*)ud.raw;
+                    shapeDef.enableSensorEvents = 1;
+                    
                     b3BodyId body = b3CreateBody(worldId, &bdef);
                     b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width*.7f, height, width*.7f});
                     
@@ -832,6 +1055,7 @@ static void UpdateDrawFrame(void)
             for (int c = 0; c < HEX_POINT_COUNT; c++)
             {
                 if ((cell.rock_bits >> c & 1) == 0) continue;
+                SetRandomSeed(x + y * 1288 + c);
 
                 Vector3 pos = hex_pos;
                 pos.x += hex_points[c].x * HEX_X * 0.5f;
@@ -849,6 +1073,12 @@ static void UpdateDrawFrame(void)
                     bdef.position.x = pos.x;
                     bdef.position.y = pos.y;
                     bdef.position.z = pos.z;
+
+                    body_userdata_t ud = {.type = UD_ROCK, .id = i, .subid = c};
+                    bdef.userData = (void*)ud.raw;
+                    shapeDef.userData = (void*)ud.raw;
+                    shapeDef.enableSensorEvents = 1;
+                    
                     b3BodyId body = b3CreateBody(worldId, &bdef);
                     b3CreateTransformedHullShape(body, &shapeDef, m->hulldata, b3Transform_identity, (b3Vec3){width, height, width});
                 }
@@ -863,6 +1093,7 @@ static void UpdateDrawFrame(void)
             for (int g = 0; g < HEX_POINT_COUNT;g++)
             {
                 if ((cell.high_grass_bits >> g & 1) == 0) continue;
+                SetRandomSeed(x + y * 128 + g);
 
                 Vector3 pos = hex_pos;
                 pos.x += hex_points[g].x * HEX_X * 0.5f;
@@ -875,7 +1106,7 @@ static void UpdateDrawFrame(void)
                     (Vector3){width, height, width}, WHITE);
             }
 
-            map[i].physics_initialized = 1;
+            g_map[i].physics_initialized = 1;
         }
 
         static float accumulator = 0;
@@ -899,6 +1130,9 @@ static void UpdateDrawFrame(void)
             DrawModelEx(g_assets.crate, (Vector3){position.x, position.y, position.z}, (Vector3){axis.x, axis.y, axis.z}, angle * RAD2DEG, (Vector3){1.0f, 1.0f, 1.0f}, WHITE);
         }
 
+        entity_list_draw_all(&g_game.logs, &g_assets.log.model);
+        entity_list_draw_all(&g_game.rock_items, &g_assets.rock_item.model);
+
         rlDisableDepthMask();
         for (int i = 0; i < shadow_count; i++)
         {
@@ -908,41 +1142,52 @@ static void UpdateDrawFrame(void)
         rlEnableDepthMask();
 
         float speed = 8.0f;
+        int moving = 0;
         if (IsKeyDown(KEY_D))
         {
+            moving = 1;
             g_game.player_pawn.target_pos.x -= dt * speed;
         }
         if (IsKeyDown(KEY_A))
         {
+            moving = 1;
             g_game.player_pawn.target_pos.x += dt * speed;
         }
         if (IsKeyDown(KEY_W))
         {
+            moving = 1;
             g_game.player_pawn.target_pos.z += dt * speed;
         }
         if (IsKeyDown(KEY_S))
         {
+            moving = 1;
             g_game.player_pawn.target_pos.z -= dt * speed;
         }
-        if (IsKeyPressed(KEY_SPACE) && bodyIdCount < 120)
+        if (IsKeyPressed(KEY_E) && !moving)
         {
+            g_game.player_pawn.action = 1;
 
-            b3BodyDef bodyDef = b3DefaultBodyDef();
-            bodyDef.type = b3_dynamicBody;
-            bodyDef.position = (b3Vec3){ 
-                g_game.player_pawn.current_pos.x, 
-                g_game.player_pawn.current_pos.y + 5.0f,
-                g_game.player_pawn.current_pos.z
-            };
-            bodyIds[bodyIdCount] = b3CreateBody(worldId, &bodyDef);
-            b3BoxHull dynamicBox = b3MakeCubeHull(0.5f);
+            // box spawning, maybe useful for later
+            // b3BodyDef bodyDef = b3DefaultBodyDef();
+            // bodyDef.type = b3_dynamicBody;
+            // bodyDef.position = (b3Vec3){ 
+            //     g_game.player_pawn.current_pos.x, 
+            //     g_game.player_pawn.current_pos.y + 5.0f,
+            //     g_game.player_pawn.current_pos.z
+            // };
+            // bodyIds[bodyIdCount] = b3CreateBody(worldId, &bodyDef);
+            // b3BoxHull dynamicBox = b3MakeCubeHull(0.5f);
 
-            b3ShapeDef shapeDef = b3DefaultShapeDef();
-            shapeDef.density = 1.0f;
-            shapeDef.baseMaterial.restitution = 0.1f;
-            shapeDef.baseMaterial.friction = 0.8f;
+            // b3ShapeDef shapeDef = b3DefaultShapeDef();
+            // shapeDef.density = 1.0f;
+            // shapeDef.baseMaterial.restitution = 0.1f;
+            // shapeDef.baseMaterial.friction = 0.8f;
 
-            b3CreateHullShape(bodyIds[bodyIdCount++], &shapeDef, &dynamicBox.base);
+            // b3CreateHullShape(bodyIds[bodyIdCount++], &shapeDef, &dynamicBox.base);
+        }
+        else
+        {
+            g_game.player_pawn.action = 0;
         }
         g_game.player_pawn.target_pos = Vector3MoveTowards(g_game.player_pawn.next_pos, g_game.player_pawn.target_pos, PAWN_JUMP_DIST);
         pawn_update(dt, &g_game.player_pawn);

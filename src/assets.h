@@ -74,6 +74,10 @@ typedef struct {
     biome_def_t biome_defs[MAX_BIOME_DEFS];
     int biome_def_count;
 
+    model_data_t log;
+    model_data_t rock_item;
+    
+
 } game_assets_t;
 
 extern game_assets_t g_assets;

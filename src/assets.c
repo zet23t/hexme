@@ -98,6 +98,8 @@ void assets_load(void)
     g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock");
     g_assets.rocks[g_assets.rocks_count++] = load_model_hull("prop_rock.001");
     
+    g_assets.log = load_model_hull("log");
+    g_assets.rock_item = load_model_hull("rock-item");
     g_assets.high_grass[g_assets.high_grass_count++] = load_model("prop-high-grass");
 
     int tcnt = 0;
